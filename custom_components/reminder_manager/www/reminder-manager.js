@@ -284,7 +284,7 @@ class ReminderManagerPanel extends HTMLElement {
         <div class="form-group">
           <label><input type="checkbox" id="input-mobile" checked> Notificare telefon</label>
           <label><input type="checkbox" id="input-persistent" checked> Notificare Home Assistant (globala)</label>
-          <div class="field-help">Cand notificarea pe telefon este activa, Reminder Manager trimite si un preaviz mobil cu countdown si butoane Done/Snooze cand reminderul intra in ultimele 5 minute. Notificarea Home Assistant este globala.</div>
+          <div class="field-help">Cand notificarea pe telefon este activa, Reminder Manager trimite un prim preaviz cu sunet la T-5 minute, apoi actualizari silențioase pe acelasi tag, cu butoane Done/Snooze. Notificarea Home Assistant este globala.</div>
         </div>
 
         <div style="display: flex; gap: 8px;">

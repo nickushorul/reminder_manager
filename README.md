@@ -25,7 +25,7 @@ Important:
    - utilizatorul sau utilizatorii care trebuie sa il vada
    - dispozitivul sau dispozitivele `notify.mobile_app_*` care trebuie sa primeasca notificarea
    - daca reminderul trebuie sa ruleze o singura data sau lunar la aceeasi data si ora
-3. Pentru reminderele cu notificare mobila activa, componenta trimite automat si un preaviz mobil cand reminderul intra in ultimele 5 minute.
+3. Pentru reminderele cu notificare mobila activa, componenta trimite automat un prim preaviz mobil cu sunet cand reminderul intra in ultimele 5 minute, apoi actualizari silențioase pe acelasi `tag`.
 4. Optiunea globala `notify_service` ramane doar fallback pentru remindere vechi sau pentru cazurile in care nu exista targete explicite pe reminder.
 
 ## Test rapid recomandat

@@ -470,7 +470,14 @@ async def _send_mobile_notification(
     )
 
 
-async def _send_pre_notification(hass, reminder, notify_service, remaining_seconds: int):
+async def _send_pre_notification(
+    hass,
+    reminder,
+    notify_service,
+    remaining_seconds: int,
+    *,
+    silent_update: bool,
+):
     """Send the pre-reminder mobile notification when the reminder enters the 5-minute window."""
     if not reminder.get("notify_mobile"):
         return
@@ -489,7 +496,7 @@ async def _send_pre_notification(hass, reminder, notify_service, remaining_secon
                 f"{title} in curand",
                 f"{message} Mai sunt aproximativ {minutes_left} minute.",
                 countdown_seconds=remaining_seconds,
-                silent_update=True,
+                silent_update=silent_update,
             )
         except Exception:
             _LOGGER.exception(
@@ -593,7 +600,13 @@ async def _process_due_reminders(
                 and 0 < remaining_seconds <= int(_PRE_NOTIFICATION_WINDOW.total_seconds())
                 and reminder.get("pre_notification_bucket") != current_bucket
             ):
-                await _send_pre_notification(hass, reminder, notify_service, remaining_seconds)
+                await _send_pre_notification(
+                    hass,
+                    reminder,
+                    notify_service,
+                    remaining_seconds,
+                    silent_update=bool(reminder.get("pre_notified")),
+                )
                 reminder["pre_notified"] = True
                 reminder["pre_notification_bucket"] = current_bucket
                 needs_save = True
