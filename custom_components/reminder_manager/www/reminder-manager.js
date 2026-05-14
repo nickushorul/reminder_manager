@@ -246,7 +246,6 @@ class ReminderManagerPanel extends HTMLElement {
           display: flex;
           flex-direction: column;
           gap: 16px;
-          min-height: 100%;
         }
         .reminder-card.status-active {
           border-top: 4px solid var(--primary-color);
@@ -434,7 +433,7 @@ class ReminderManagerPanel extends HTMLElement {
             grid-template-columns: 1fr;
           }
         }
-        @media (min-width: 1180px) {
+        @media (min-width: 800px) {
           .reminders-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
