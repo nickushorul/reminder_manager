@@ -88,6 +88,17 @@ class ReminderManagerPanel extends HTMLElement {
           align-items: center;
           margin-bottom: 24px;
         }
+        .header-main {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-width: 0;
+        }
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
         h1 {
           margin: 0;
           font-size: 24px;
@@ -110,6 +121,13 @@ class ReminderManagerPanel extends HTMLElement {
         }
         .button-danger {
           background-color: var(--error-color);
+        }
+        .back-button {
+          display: none;
+          padding: 8px 12px;
+          font-size: 14px;
+          line-height: 1;
+          white-space: nowrap;
         }
         .card {
           background-color: var(--card-background-color, white);
@@ -326,6 +344,19 @@ class ReminderManagerPanel extends HTMLElement {
             align-items: stretch;
             gap: 12px;
           }
+          .header-main,
+          .header-actions {
+            width: 100%;
+          }
+          .header-main {
+            justify-content: space-between;
+          }
+          .header-actions {
+            justify-content: flex-end;
+          }
+          .back-button {
+            display: inline-flex;
+          }
           .reminder-title {
             font-size: 24px;
           }
@@ -341,8 +372,13 @@ class ReminderManagerPanel extends HTMLElement {
       </style>
       
       <div class="header">
-        <h1>Reminder Manager</h1>
-        <button id="btn-show-add">Adauga reminder</button>
+        <div class="header-main">
+          <button id="btn-back" class="button-secondary back-button" type="button">Inapoi</button>
+          <h1>Reminder Manager</h1>
+        </div>
+        <div class="header-actions">
+          <button id="btn-show-add" type="button">Adauga reminder</button>
+        </div>
       </div>
 
       <div id="reminder-form" class="card">
@@ -430,6 +466,10 @@ class ReminderManagerPanel extends HTMLElement {
 
       <div id="reminders-container"></div>
     `;
+
+    this.shadowRoot.getElementById("btn-back").addEventListener("click", () => {
+      this.goBack();
+    });
 
     this.shadowRoot.getElementById("btn-show-add").addEventListener("click", () => {
       this.openForm();
@@ -602,6 +642,28 @@ class ReminderManagerPanel extends HTMLElement {
     });
 
     return parts.length > 0 ? parts.join(" ") : "0 secunde";
+  }
+
+  getFallbackBackPath() {
+    if (this._hass && typeof this._hass.hassUrl === "function") {
+      return this._hass.hassUrl("/");
+    }
+    return "/";
+  }
+
+  goBack() {
+    const currentPath = window.location.pathname;
+    if (window.history.length > 1) {
+      window.history.back();
+      window.setTimeout(() => {
+        if (window.location.pathname === currentPath) {
+          window.location.assign(this.getFallbackBackPath());
+        }
+      }, 180);
+      return;
+    }
+
+    window.location.assign(this.getFallbackBackPath());
   }
 
   openForm(reminder = null) {

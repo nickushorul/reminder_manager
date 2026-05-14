@@ -72,9 +72,29 @@ def _remove_service(hass: HomeAssistant, service_name: str) -> None:
         hass.services.async_remove(DOMAIN, service_name)
 
 
-def _notification_tag(reminder_id: str) -> str:
-    """Return the shared mobile notification tag for a reminder."""
-    return f"reminder_manager_{reminder_id}"
+def _notification_tag(reminder_id: str, phase: str = "countdown") -> str:
+    """Return the mobile notification tag for a reminder notification phase."""
+    return f"reminder_manager_{reminder_id}_{phase}"
+
+
+def _notification_progress(reminder: dict, now_utc, target_time_utc) -> int | None:
+    """Return a 0-100 progress value for Android progress notifications."""
+    start_time = reminder.get("start_time")
+    if not start_time:
+        return None
+
+    parsed_start = dt_util.parse_datetime(start_time)
+    if not parsed_start:
+        return None
+
+    start_time_utc = dt_util.as_utc(parsed_start)
+    total_seconds = int((target_time_utc - start_time_utc).total_seconds())
+    if total_seconds <= 0:
+        return None
+
+    elapsed_seconds = int((now_utc - start_time_utc).total_seconds())
+    progress = round((max(0, min(elapsed_seconds, total_seconds)) / total_seconds) * 100)
+    return max(0, min(progress, 100))
 
 
 def _build_notification_actions(reminder_id: str) -> list[dict[str, str]]:
@@ -388,35 +408,42 @@ async def update_listener(hass: HomeAssistant, entry: ConfigEntry):
     hass.data.setdefault(DOMAIN, {})["notify_service"] = _get_notify_service(entry)
 
 
-async def _clear_mobile_notifications(hass, reminder, notify_service):
+async def _clear_mobile_notifications(
+    hass,
+    reminder,
+    notify_service,
+    *,
+    phases: tuple[str, ...] = ("countdown", "expired"),
+):
     """Clear the mobile notification for a reminder across all configured targets."""
     reminder_id = reminder.get("id")
     if not reminder_id:
         return
 
-    tag = _notification_tag(reminder_id)
+    tags = [_notification_tag(reminder_id, phase) for phase in phases]
     notify_targets = reminder_targets(reminder) or ([notify_service] if notify_service else [])
 
     for target in notify_targets:
-        try:
-            domain, service = target.split(".", 1) if "." in target else ("notify", "notify")
-            await hass.services.async_call(
-                domain,
-                service,
-                {
-                    "message": "clear_notification",
-                    "data": {
-                        "tag": tag,
+        for tag in tags:
+            try:
+                domain, service = target.split(".", 1) if "." in target else ("notify", "notify")
+                await hass.services.async_call(
+                    domain,
+                    service,
+                    {
+                        "message": "clear_notification",
+                        "data": {
+                            "tag": tag,
+                        },
                     },
-                },
-                blocking=True,
-            )
-        except Exception:
-            _LOGGER.exception(
-                "Failed to clear mobile notification using %s for reminder %s.",
-                target,
-                reminder_id,
-            )
+                    blocking=True,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to clear mobile notification using %s for reminder %s.",
+                    target,
+                    reminder_id,
+                )
 
 
 async def _send_mobile_notification(
@@ -428,23 +455,41 @@ async def _send_mobile_notification(
     *,
     countdown_seconds: int | None = None,
     silent_update: bool = False,
+    phase: str = "countdown",
+    interruption_level: str | None = None,
+    sound=None,
+    progress: int | None = None,
 ):
     """Send a mobile notification to one configured notify target."""
     reminder_id = reminder.get("id")
-    tag = _notification_tag(reminder_id)
+    tag = _notification_tag(reminder_id, phase)
     data = {
         "tag": tag,
-        "group": "reminder_manager",
+        "group": f"reminder_manager_{reminder_id}",
         "persistent": True,
+        "sticky": True,
         "actions": _build_notification_actions(reminder_id),
+        "url": f"/{PANEL_URL_PATH}",
+        "clickAction": f"/{PANEL_URL_PATH}",
     }
+
+    push_data = {}
 
     if silent_update:
         data["alert_once"] = True
-        data["push"] = {
-            "sound": "none",
-            "interruption-level": "passive",
-        }
+        push_data["sound"] = "none"
+        push_data["interruption-level"] = "passive"
+    else:
+        data["presentation_options"] = ["alert", "badge", "sound"]
+
+    if interruption_level:
+        push_data["interruption-level"] = interruption_level
+
+    if sound is not None:
+        push_data["sound"] = sound
+
+    if push_data:
+        data["push"] = push_data
 
     if countdown_seconds is not None and countdown_seconds > 0:
         data.update(
@@ -456,6 +501,10 @@ async def _send_mobile_notification(
                 "critical_text": f"{max(1, (countdown_seconds + 59) // 60)}m",
             }
         )
+
+    if progress is not None:
+        data["progress"] = progress
+        data["progress_max"] = 100
 
     domain, service = target.split(".", 1) if "." in target else ("notify", "notify")
     await hass.services.async_call(
@@ -486,6 +535,8 @@ async def _send_pre_notification(
     message = reminder.get("message", "Reminder upcoming!")
     minutes_left = max(1, (remaining_seconds + 59) // 60)
     notify_targets = reminder_targets(reminder) or [notify_service]
+    target_time = _parse_target_time(reminder["target_time"])
+    progress = _notification_progress(reminder, dt_util.utcnow(), dt_util.as_utc(target_time))
 
     for target in notify_targets:
         try:
@@ -497,6 +548,10 @@ async def _send_pre_notification(
                 f"{message} Mai sunt aproximativ {minutes_left} minute.",
                 countdown_seconds=remaining_seconds,
                 silent_update=silent_update,
+                phase="countdown",
+                interruption_level="active" if not silent_update else None,
+                sound="default" if not silent_update else None,
+                progress=progress,
             )
         except Exception:
             _LOGGER.exception(
@@ -512,6 +567,13 @@ async def _send_notification(hass, reminder, notify_service):
     message = reminder.get("message", "Reminder expired!")
     reminder_id = reminder.get("id")
     persistent_sent = False
+
+    await _clear_mobile_notifications(
+        hass,
+        reminder,
+        notify_service,
+        phases=("countdown",),
+    )
 
     if reminder.get("notify_persistent"):
         try:
@@ -540,8 +602,11 @@ async def _send_notification(hass, reminder, notify_service):
                     hass,
                     target,
                     reminder,
-                    title,
-                    message,
+                    f"{title} a expirat",
+                    f"{message} Reminderul a expirat acum.",
+                    phase="expired",
+                    interruption_level="time-sensitive",
+                    sound="default",
                 )
             except Exception as e:
                 _LOGGER.warning(
