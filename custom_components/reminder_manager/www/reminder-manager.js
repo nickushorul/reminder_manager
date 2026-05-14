@@ -76,11 +76,11 @@ class ReminderManagerPanel extends HTMLElement {
       <style>
         :host {
           display: block;
+          box-sizing: border-box;
           padding: 16px;
           font-family: var(--paper-font-body1_-_font-family, sans-serif);
           background-color: var(--primary-background-color);
           color: var(--primary-text-color);
-          min-height: 100vh;
         }
         .header {
           display: flex;
@@ -311,6 +311,12 @@ class ReminderManagerPanel extends HTMLElement {
           line-height: 1.35;
           word-break: break-word;
         }
+        .meta-compact {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
         .reminder-timer-block {
           display: flex;
           flex-direction: column;
@@ -336,30 +342,94 @@ class ReminderManagerPanel extends HTMLElement {
           background: color-mix(in srgb, var(--primary-background-color) 60%, transparent);
         }
         @media (max-width: 880px) {
+          :host {
+            padding: 10px;
+          }
           .tabs {
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 6px;
+            -webkit-overflow-scrolling: touch;
+          }
+          .tab {
+            flex: 0 0 auto;
+            white-space: nowrap;
           }
           .header {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 12px;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
           }
           .header-main,
           .header-actions {
-            width: 100%;
+            width: auto;
           }
           .header-main {
-            justify-content: space-between;
+            flex: 1;
+            min-width: 0;
+            justify-content: flex-start;
           }
           .header-actions {
             justify-content: flex-end;
+            flex-shrink: 0;
           }
           .back-button {
             display: inline-flex;
           }
-          .reminder-title {
-            font-size: 24px;
+          h1 {
+            font-size: 20px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
+          .reminder-title {
+            font-size: 21px;
+          }
+          .reminder-message {
+            font-size: 15px;
+          }
+          .reminder-meta-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+          .reminder-card {
+            padding: 14px;
+            gap: 12px;
+            border-radius: 14px;
+          }
+          .reminder-meta-card {
+            padding: 9px 10px;
+          }
+          .reminder-meta-value {
+            font-size: 13px;
+          }
+          .countdown {
+            font-size: 18px;
+          }
+          .reminder-timer-block {
+            padding: 12px;
+          }
+          .reminder-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+          .reminder-actions button,
+          .reminder-actions .snooze-wrapper {
+            width: 100%;
+          }
+          .snooze-wrapper {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 6px;
+          }
+          .snooze-wrapper select {
+            width: 100%;
+          }
+        }
+        @media (max-width: 420px) {
           .reminder-meta-grid {
             grid-template-columns: 1fr;
           }
@@ -607,6 +677,14 @@ class ReminderManagerPanel extends HTMLElement {
     return repeat === "monthly" ? "Lunar" : "O singura data";
   }
 
+  escapeAttribute(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("\"", "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
   formatStatusLabel(status) {
     if (status === "active") return "Activ";
     if (status === "expired") return "Expirat";
@@ -845,11 +923,11 @@ class ReminderManagerPanel extends HTMLElement {
           </div>
           <div class="reminder-meta-card">
             <div class="reminder-meta-label">Utilizatori</div>
-            <div class="reminder-meta-value">${this.formatUserNames(r.target_user_ids)}</div>
+            <div class="reminder-meta-value meta-compact" title="${this.escapeAttribute(this.formatUserNames(r.target_user_ids))}">${this.formatUserNames(r.target_user_ids)}</div>
           </div>
           <div class="reminder-meta-card">
             <div class="reminder-meta-label">Dispozitive</div>
-            <div class="reminder-meta-value">${this.formatNotifyTargets(r.notify_targets)}</div>
+            <div class="reminder-meta-value meta-compact" title="${this.escapeAttribute(this.formatNotifyTargets(r.notify_targets))}">${this.formatNotifyTargets(r.notify_targets)}</div>
           </div>
         </div>
       `;
