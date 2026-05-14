@@ -20,6 +20,16 @@ create:
       required: false
       selector:
         text:
+    repeat:
+      name: "Repetare"
+      description: "Seteaza monthly pentru un reminder lunar fix sau none pentru reminder unic."
+      required: false
+      default: "none"
+      selector:
+        select:
+          options:
+            - "none"
+            - "monthly"
     duration_minutes:
       name: "Durata in minute"
       description: "Peste cate minute (ignorat daca exista target_time)"
@@ -66,7 +76,7 @@ update:
         text:
     updates:
       name: "Updates"
-      description: "Campuri partiale de actualizat, inclusiv target_user_ids sau notify_targets."
+      description: "Campuri partiale de actualizat, inclusiv repeat, target_user_ids sau notify_targets."
       required: true
       selector:
         object:

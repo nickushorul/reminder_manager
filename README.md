@@ -24,14 +24,18 @@ Important:
 2. La creare sau editare, alege pentru fiecare reminder:
    - utilizatorul sau utilizatorii care trebuie sa il vada
    - dispozitivul sau dispozitivele `notify.mobile_app_*` care trebuie sa primeasca notificarea
-3. Optiunea globala `notify_service` ramane doar fallback pentru remindere vechi sau pentru cazurile in care nu exista targete explicite pe reminder.
+   - daca reminderul trebuie sa ruleze o singura data sau lunar la aceeasi data si ora
+3. Pentru reminderele cu notificare mobila activa, componenta trimite automat si un preaviz mobil cand reminderul intra in ultimele 5 minute.
+4. Optiunea globala `notify_service` ramane doar fallback pentru remindere vechi sau pentru cazurile in care nu exista targete explicite pe reminder.
 
 ## Test rapid recomandat
 1. Creeaza un reminder peste 1 minut.
 2. Verifica daca apare in lista si daca countdown-ul scade.
 3. Verifica notificarea mobila si notificarea persistenta.
-4. Testeaza `Snooze`, `Done` si `Delete`.
-5. Restarteaza Home Assistant si verifica daca reminderul ramane salvat.
+4. Verifica preavizul mobil din ultimele 5 minute si butoanele `Done` / `Snooze`.
+5. Testeaza `Delete`.
+6. Creeaza un reminder lunar si verifica daca dupa expirare apare automat urmatoarea aparitie pentru luna urmatoare.
+7. Restarteaza Home Assistant si verifica daca reminderul ramane salvat.
 
 ## Instalare manuala
 1. Copiaza folderul `custom_components/reminder_manager` in:
@@ -49,7 +53,9 @@ Pentru dezvoltare/publicare:
 1. Modifica codul.
 2. Creste `version` in `custom_components/reminder_manager/manifest.json`.
 3. Commit + push pe `main`.
-4. Creeaza un GitHub Release, de exemplu `v1.0.1`.
+4. Creeaza un GitHub Release, de exemplu `v1.2.0`.
+5. In repository-ul GitHub, adauga topic-uri pentru HACS, de exemplu:
+   `home-assistant`, `home-assistant-integration`, `hacs`, `reminder`
 
 Cum functioneaza:
 - daca publici GitHub Releases, HACS foloseste release-ul cel mai nou pentru versiune si update-uri

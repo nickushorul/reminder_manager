@@ -261,6 +261,15 @@ class ReminderManagerPanel extends HTMLElement {
         </div>
 
         <div class="form-group">
+          <label>Repetare</label>
+          <select id="input-repeat">
+            <option value="none">fara repetare</option>
+            <option value="monthly">lunar la aceeasi data si ora</option>
+          </select>
+          <div class="field-help">Repetarea lunara functioneaza pentru remindere setate la data si ora fixa. Daca o luna are mai putine zile, reminderul ruleaza in ultima zi disponibila.</div>
+        </div>
+
+        <div class="form-group">
           <label>Utilizatori reminder</label>
           <select id="input-users" multiple size="4"></select>
           <div class="field-help">Daca selectezi mai multi utilizatori, se creeaza remindere separate si independente pentru fiecare.</div>
@@ -275,7 +284,7 @@ class ReminderManagerPanel extends HTMLElement {
         <div class="form-group">
           <label><input type="checkbox" id="input-mobile" checked> Notificare telefon</label>
           <label><input type="checkbox" id="input-persistent" checked> Notificare Home Assistant (globala)</label>
-          <div class="field-help">Notificarea Home Assistant este globala. Home Assistant nu ofera targetare persistenta per user.</div>
+          <div class="field-help">Cand notificarea pe telefon este activa, Reminder Manager trimite si un preaviz mobil cu countdown si butoane Done/Snooze cand reminderul intra in ultimele 5 minute. Notificarea Home Assistant este globala.</div>
         </div>
 
         <div style="display: flex; gap: 8px;">
@@ -328,6 +337,13 @@ class ReminderManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById("input-mode").value = mode;
     this.shadowRoot.getElementById("duration-fields").style.display = mode === "duration" ? "block" : "none";
     this.shadowRoot.getElementById("datetime-fields").style.display = mode === "datetime" ? "flex" : "none";
+    const repeat = this.shadowRoot.getElementById("input-repeat");
+    if (repeat) {
+      repeat.disabled = mode !== "datetime";
+      if (mode !== "datetime") {
+        repeat.value = "none";
+      }
+    }
   }
 
   formatDateValue(date) {
@@ -418,6 +434,10 @@ class ReminderManagerPanel extends HTMLElement {
     }).join(", ");
   }
 
+  formatRepeatLabel(repeat) {
+    return repeat === "monthly" ? "Lunar" : "O singura data";
+  }
+
   openForm(reminder = null) {
     this.editingId = reminder ? reminder.id : null;
     this.shadowRoot.getElementById("form-title").textContent = reminder ? "Editeaza Reminder" : "Adauga Reminder Nou";
@@ -427,15 +447,14 @@ class ReminderManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById("input-mobile").checked = reminder ? reminder.notify_mobile : true;
     this.shadowRoot.getElementById("input-persistent").checked = reminder ? reminder.notify_persistent : true;
 
-    this.shadowRoot.getElementById("input-mode").value = "duration";
-    this.shadowRoot.getElementById("duration-fields").style.display = "block";
-    this.shadowRoot.getElementById("datetime-fields").style.display = "none";
+    this.setMode("duration");
 
     this.shadowRoot.getElementById("input-days").value = "0";
     this.shadowRoot.getElementById("input-hours").value = "0";
     this.shadowRoot.getElementById("input-minutes").value = "10";
     this.shadowRoot.getElementById("input-date").value = "";
     this.shadowRoot.getElementById("input-time").value = "";
+    this.shadowRoot.getElementById("input-repeat").value = reminder ? (reminder.repeat || "none") : "none";
     this.setSelectedValues("input-users", reminder ? (reminder.target_user_ids || []) : this.getDefaultTargetUserIds());
     this.setSelectedValues("input-notify-targets", reminder ? (reminder.notify_targets || []) : []);
     this.toggleNotifyTargetGroup();
@@ -457,6 +476,7 @@ class ReminderManagerPanel extends HTMLElement {
     const title = this.shadowRoot.getElementById("input-title").value;
     const message = this.shadowRoot.getElementById("input-message").value;
     const mode = this.shadowRoot.getElementById("input-mode").value;
+    const repeat = mode === "datetime" ? this.shadowRoot.getElementById("input-repeat").value : "none";
     const mobile = this.shadowRoot.getElementById("input-mobile").checked;
     const persistent = this.shadowRoot.getElementById("input-persistent").checked;
     const targetUserIds = this.getSelectedValues("input-users");
@@ -513,10 +533,11 @@ class ReminderManagerPanel extends HTMLElement {
         id: this.editingId, 
         updates: { 
           title, message, target_time: targetTime.toISOString(), 
+          repeat,
           notify_mobile: mobile, notify_persistent: persistent,
           target_user_ids: targetUserIds,
           notify_targets: notifyTargets,
-          status: "active", notified: false
+          status: "active", notified: false, pre_notified: false
         } 
       });
     } else {
@@ -526,11 +547,13 @@ class ReminderManagerPanel extends HTMLElement {
         start_time: startTime.toISOString(),
         target_time: targetTime.toISOString(),
         status: "active",
+        repeat,
         notify_mobile: mobile,
         notify_persistent: persistent,
         target_user_ids: targetUserIds.length > 0 ? targetUserIds : this.getDefaultTargetUserIds(),
         notify_targets: notifyTargets,
-        notified: false
+        notified: false,
+        pre_notified: false
       };
       this.performAction("add", { reminder });
     }
@@ -564,6 +587,7 @@ class ReminderManagerPanel extends HTMLElement {
         <div class="reminder-title">${r.title}</div>
         <div class="reminder-meta">${r.message}</div>
         <div class="reminder-meta">Tinta: ${targetTime.toLocaleString()} (${r.status})</div>
+        <div class="reminder-meta">Repetare: ${this.formatRepeatLabel(r.repeat)}</div>
         <div class="reminder-meta">Utilizatori: ${this.formatUserNames(r.target_user_ids)}</div>
         <div class="reminder-meta">Dispozitive: ${this.formatNotifyTargets(r.notify_targets)}</div>
       `;

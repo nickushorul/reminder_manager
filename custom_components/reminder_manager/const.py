@@ -14,3 +14,6 @@ STATUS_ACTIVE = "active"
 STATUS_EXPIRED = "expired"
 STATUS_DONE = "done"
 STATUS_DELETED = "deleted"
+
+REPEAT_NONE = "none"
+REPEAT_MONTHLY = "monthly"

@@ -6,6 +6,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import API_ENDPOINT
 from .reminders import (
+    enrich_repeat_metadata,
     normalize_reminder_payload,
     normalize_reminder_updates,
     reminder_is_visible_to_user,
@@ -105,6 +106,10 @@ class ReminderManagerAPI(HomeAssistantView):
             except ValueError as err:
                 return self.json({"error": str(err)}, status_code=400)
 
+            reminder.setdefault("pre_notified", False)
+            reminder.setdefault("next_occurrence_scheduled", False)
+            reminder = enrich_repeat_metadata(reminder, target_time)
+
             if not reminder.get("id"):
                 reminder["id"] = str(uuid.uuid4())
             reminders_to_add = split_reminder_per_user(reminder, lambda: str(uuid.uuid4()))
@@ -130,6 +135,7 @@ class ReminderManagerAPI(HomeAssistantView):
                 except ValueError as err:
                     return self.json({"error": str(err)}, status_code=400)
 
+                target_time = None
                 if "target_time" in updates:
                     try:
                         target_time = _parse_target_time(updates["target_time"])
@@ -141,6 +147,18 @@ class ReminderManagerAPI(HomeAssistantView):
                             {"error": "target_time must be in the future"},
                             status_code=400,
                         )
+                    updates.setdefault("status", "active")
+                    updates.setdefault("notified", False)
+                    updates.setdefault("pre_notified", False)
+
+                if "target_time" in updates or "repeat" in updates:
+                    effective_target_time = target_time if "target_time" in updates else _parse_target_time(
+                        stored_reminder["target_time"]
+                    )
+                    combined = enrich_repeat_metadata({**stored_reminder, **updates}, effective_target_time)
+                    updates["repeat"] = combined.get("repeat")
+                    updates["repeat_day"] = combined.get("repeat_day")
+                    updates["repeat_time"] = combined.get("repeat_time")
 
                 updated = await self.storage.update_reminder(reminder_id, updates)
             else:

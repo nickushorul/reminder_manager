@@ -1,10 +1,13 @@
 {
   "domain": "reminder_manager",
   "name": "Reminder Manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "documentation": "https://github.com/nickushorul/reminder_manager",
   "issue_tracker": "https://github.com/nickushorul/reminder_manager/issues",
-  "dependencies": [],
+  "dependencies": [
+    "frontend",
+    "http"
+  ],
   "codeowners": [
     "@nickushorul"
   ],
