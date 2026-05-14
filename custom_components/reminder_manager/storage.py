@@ -40,6 +40,12 @@ class ReminderStorage:
         self.data["reminders"] = reminders
         await self.async_save()
 
+    async def add_reminders(self, reminders_to_add: list[dict]):
+        reminders = self.get_reminders()
+        reminders.extend(reminders_to_add)
+        self.data["reminders"] = reminders
+        await self.async_save()
+
     async def update_reminder(self, reminder_id: str, updates: dict):
         reminders = self.get_reminders()
         updated = False

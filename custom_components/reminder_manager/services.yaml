@@ -28,6 +28,32 @@ create:
         number:
           min: 0
           max: 1440
+    target_user_ids:
+      name: "User IDs"
+      description: "Lista userilor Home Assistant care primesc reminderul in panel."
+      required: false
+      selector:
+        object:
+    notify_targets:
+      name: "Notify targets"
+      description: "Lista serviciilor notify.* pentru dispozitivele care primesc notificarea."
+      required: false
+      selector:
+        object:
+    notify_mobile:
+      name: "Notificare telefon"
+      description: "Activeaza trimiterea catre serviciile notify selectate."
+      required: false
+      default: true
+      selector:
+        boolean:
+    notify_persistent:
+      name: "Notificare Home Assistant"
+      description: "Creeaza o notificare persistenta globala in Home Assistant."
+      required: false
+      default: true
+      selector:
+        boolean:
 update:
   name: "Update Reminder"
   description: "Actualizeaza un reminder existent."
@@ -38,6 +64,12 @@ update:
       required: true
       selector:
         text:
+    updates:
+      name: "Updates"
+      description: "Campuri partiale de actualizat, inclusiv target_user_ids sau notify_targets."
+      required: true
+      selector:
+        object:
 delete:
   name: "Delete Reminder"
   description: "Sterge un reminder."

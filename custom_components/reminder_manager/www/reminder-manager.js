@@ -3,6 +3,9 @@ class ReminderManagerPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this.reminders = [];
+    this.availableUsers = [];
+    this.availableNotifyTargets = [];
+    this.currentUser = null;
     this.intervalId = null;
     this.editingId = null;
   }
@@ -28,9 +31,22 @@ class ReminderManagerPanel extends HTMLElement {
 
   async fetchData() {
     try {
-      const response = await this._hass.fetchWithAuth("/api/reminder_manager");
+      const selectedUsers = this.getSelectedValues("input-users");
+      const selectedNotifyTargets = this.getSelectedValues("input-notify-targets");
+      const response = await this._hass.fetchWithAuth("/api/reminder_manager?include_meta=1");
       if (response.ok) {
-        this.reminders = await response.json();
+        const payload = await response.json();
+        if (Array.isArray(payload)) {
+          this.reminders = payload;
+        } else {
+          this.reminders = payload.reminders || [];
+          this.currentUser = payload.current_user || null;
+          this.availableUsers = payload.available_users || [];
+          this.availableNotifyTargets = payload.available_notify_targets || [];
+          this.renderRecipientOptions();
+          this.setSelectedValues("input-users", selectedUsers);
+          this.setSelectedValues("input-notify-targets", selectedNotifyTargets);
+        }
         this.renderReminders();
       }
     } catch (err) {
@@ -40,13 +56,18 @@ class ReminderManagerPanel extends HTMLElement {
 
   async performAction(action, payload) {
     try {
-      await this._hass.fetchWithAuth("/api/reminder_manager", {
+      const response = await this._hass.fetchWithAuth("/api/reminder_manager", {
         method: "POST",
         body: JSON.stringify({ action, ...payload })
       });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || `Action ${action} failed`);
+      }
       this.fetchData();
     } catch (err) {
       console.error("Error performing action", action, err);
+      alert(err.message || "Actiunea a esuat.");
     }
   }
 
@@ -113,6 +134,14 @@ class ReminderManagerPanel extends HTMLElement {
           box-sizing: border-box;
           background-color: var(--card-background-color);
           color: var(--primary-text-color);
+        }
+        select[multiple] {
+          min-height: 112px;
+        }
+        .field-help {
+          margin-top: 6px;
+          font-size: 12px;
+          color: var(--secondary-text-color);
         }
         .progress-bar-container {
           width: 100%;
@@ -232,8 +261,21 @@ class ReminderManagerPanel extends HTMLElement {
         </div>
 
         <div class="form-group">
+          <label>Utilizatori reminder</label>
+          <select id="input-users" multiple size="4"></select>
+          <div class="field-help">Daca selectezi mai multi utilizatori, se creeaza remindere separate si independente pentru fiecare.</div>
+        </div>
+
+        <div id="notify-targets-group" class="form-group">
+          <label>Dispozitive pentru notificare</label>
+          <select id="input-notify-targets" multiple size="5"></select>
+          <div class="field-help">Selecteaza unul sau mai multe servicii notify.mobile_app_* pentru acest reminder.</div>
+        </div>
+
+        <div class="form-group">
           <label><input type="checkbox" id="input-mobile" checked> Notificare telefon</label>
-          <label><input type="checkbox" id="input-persistent" checked> Notificare Home Assistant</label>
+          <label><input type="checkbox" id="input-persistent" checked> Notificare Home Assistant (globala)</label>
+          <div class="field-help">Notificarea Home Assistant este globala. Home Assistant nu ofera targetare persistenta per user.</div>
         </div>
 
         <div style="display: flex; gap: 8px;">
@@ -262,6 +304,9 @@ class ReminderManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById("input-mode").addEventListener("change", (e) => {
       this.setMode(e.target.value);
     });
+    this.shadowRoot.getElementById("input-mobile").addEventListener("change", () => {
+      this.toggleNotifyTargetGroup();
+    });
 
     this.shadowRoot.getElementById("btn-save").addEventListener("click", () => this.saveReminder());
 
@@ -275,6 +320,8 @@ class ReminderManagerPanel extends HTMLElement {
     });
 
     this.currentTab = "active";
+    this.renderRecipientOptions();
+    this.toggleNotifyTargetGroup();
   }
 
   setMode(mode) {
@@ -296,6 +343,81 @@ class ReminderManagerPanel extends HTMLElement {
     return `${hours}:${minutes}`;
   }
 
+  getSelectedValues(elementId) {
+    const element = this.shadowRoot.getElementById(elementId);
+    if (!element) {
+      return [];
+    }
+    return Array.from(element.selectedOptions).map((option) => option.value);
+  }
+
+  setSelectedValues(elementId, values) {
+    const element = this.shadowRoot.getElementById(elementId);
+    if (!element) {
+      return;
+    }
+
+    const selected = new Set(values || []);
+    Array.from(element.options).forEach((option) => {
+      option.selected = selected.has(option.value);
+    });
+  }
+
+  renderRecipientOptions() {
+    this.renderSelectOptions("input-users", this.availableUsers, "id", "name", "Nu exista utilizatori disponibili.");
+    this.renderSelectOptions("input-notify-targets", this.availableNotifyTargets, "service", "label", "Nu exista servicii notify disponibile.");
+  }
+
+  renderSelectOptions(elementId, items, valueKey, labelKey, emptyLabel) {
+    const element = this.shadowRoot.getElementById(elementId);
+    if (!element) {
+      return;
+    }
+
+    if (!items || items.length === 0) {
+      element.innerHTML = `<option value="" disabled>${emptyLabel}</option>`;
+      return;
+    }
+
+    element.innerHTML = items
+      .map((item) => `<option value="${item[valueKey]}">${item[labelKey]}</option>`)
+      .join("");
+  }
+
+  toggleNotifyTargetGroup() {
+    const mobileEnabled = this.shadowRoot.getElementById("input-mobile")?.checked;
+    const group = this.shadowRoot.getElementById("notify-targets-group");
+    if (group) {
+      group.style.display = mobileEnabled ? "block" : "none";
+    }
+  }
+
+  getDefaultTargetUserIds() {
+    return this.currentUser ? [this.currentUser.id] : [];
+  }
+
+  formatUserNames(userIds) {
+    if (!userIds || userIds.length === 0) {
+      return "shared";
+    }
+
+    return userIds.map((userId) => {
+      const match = this.availableUsers.find((user) => user.id === userId);
+      return match ? match.name : userId;
+    }).join(", ");
+  }
+
+  formatNotifyTargets(targets) {
+    if (!targets || targets.length === 0) {
+      return "fallback global";
+    }
+
+    return targets.map((target) => {
+      const match = this.availableNotifyTargets.find((item) => item.service === target);
+      return match ? match.label : target;
+    }).join(", ");
+  }
+
   openForm(reminder = null) {
     this.editingId = reminder ? reminder.id : null;
     this.shadowRoot.getElementById("form-title").textContent = reminder ? "Editeaza Reminder" : "Adauga Reminder Nou";
@@ -314,6 +436,9 @@ class ReminderManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById("input-minutes").value = "10";
     this.shadowRoot.getElementById("input-date").value = "";
     this.shadowRoot.getElementById("input-time").value = "";
+    this.setSelectedValues("input-users", reminder ? (reminder.target_user_ids || []) : this.getDefaultTargetUserIds());
+    this.setSelectedValues("input-notify-targets", reminder ? (reminder.notify_targets || []) : []);
+    this.toggleNotifyTargetGroup();
 
     if (reminder && reminder.target_time) {
       const targetTime = new Date(reminder.target_time);
@@ -334,9 +459,21 @@ class ReminderManagerPanel extends HTMLElement {
     const mode = this.shadowRoot.getElementById("input-mode").value;
     const mobile = this.shadowRoot.getElementById("input-mobile").checked;
     const persistent = this.shadowRoot.getElementById("input-persistent").checked;
+    const targetUserIds = this.getSelectedValues("input-users");
+    const notifyTargets = this.getSelectedValues("input-notify-targets");
 
     if (!title || !message) {
       alert("Completati titlul si mesajul!");
+      return;
+    }
+
+    if (this.availableUsers.length > 0 && targetUserIds.length === 0) {
+      alert("Selectati cel putin un utilizator pentru reminder.");
+      return;
+    }
+
+    if (mobile && this.availableNotifyTargets.length > 0 && notifyTargets.length === 0) {
+      alert("Selectati cel putin un dispozitiv pentru notificarea pe telefon.");
       return;
     }
 
@@ -377,6 +514,8 @@ class ReminderManagerPanel extends HTMLElement {
         updates: { 
           title, message, target_time: targetTime.toISOString(), 
           notify_mobile: mobile, notify_persistent: persistent,
+          target_user_ids: targetUserIds,
+          notify_targets: notifyTargets,
           status: "active", notified: false
         } 
       });
@@ -389,6 +528,8 @@ class ReminderManagerPanel extends HTMLElement {
         status: "active",
         notify_mobile: mobile,
         notify_persistent: persistent,
+        target_user_ids: targetUserIds.length > 0 ? targetUserIds : this.getDefaultTargetUserIds(),
+        notify_targets: notifyTargets,
         notified: false
       };
       this.performAction("add", { reminder });
@@ -423,6 +564,8 @@ class ReminderManagerPanel extends HTMLElement {
         <div class="reminder-title">${r.title}</div>
         <div class="reminder-meta">${r.message}</div>
         <div class="reminder-meta">Tinta: ${targetTime.toLocaleString()} (${r.status})</div>
+        <div class="reminder-meta">Utilizatori: ${this.formatUserNames(r.target_user_ids)}</div>
+        <div class="reminder-meta">Dispozitive: ${this.formatNotifyTargets(r.notify_targets)}</div>
       `;
 
       if (r.status === "active" || r.status === "expired") {

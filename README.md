@@ -20,10 +20,11 @@ Important:
 - structura repository-ului este pentru `custom_components/reminder_manager`
 
 ## Configurare initiala
-1. Dupa adaugarea integrarii, seteaza serviciul de notificare pentru telefon.
-2. Exemplu:
-   `notify.mobile_app_iphone`
-3. Verifica daca apare `Reminder Manager` in sidebar.
+1. Dupa adaugarea integrarii, verifica daca apare `Reminder Manager` in sidebar.
+2. La creare sau editare, alege pentru fiecare reminder:
+   - utilizatorul sau utilizatorii care trebuie sa il vada
+   - dispozitivul sau dispozitivele `notify.mobile_app_*` care trebuie sa primeasca notificarea
+3. Optiunea globala `notify_service` ramane doar fallback pentru remindere vechi sau pentru cazurile in care nu exista targete explicite pe reminder.
 
 ## Test rapid recomandat
 1. Creeaza un reminder peste 1 minut.

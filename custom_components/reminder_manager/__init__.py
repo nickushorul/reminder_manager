@@ -11,6 +11,12 @@ from homeassistant.util import dt as dt_util
 from .api import ReminderManagerAPI
 from .const import DOMAIN, PANEL_URL_PATH, STATUS_ACTIVE, STATUS_DONE, STATUS_EXPIRED
 from .panel import async_setup_panel
+from .reminders import (
+    normalize_reminder_payload,
+    normalize_reminder_updates,
+    reminder_targets,
+    split_reminder_per_user,
+)
 from .storage import ReminderStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,7 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     api_view = domain_data.get("api_view")
     if api_view is None:
-        api_view = ReminderManagerAPI(storage)
+        api_view = ReminderManagerAPI(hass, storage)
         hass.http.register_view(api_view)
         domain_data["api_view"] = api_view
     else:
@@ -100,18 +106,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 raise ValueError("duration_minutes must be greater than zero")
             target_time = current_time + datetime.timedelta(minutes=duration_minutes)
 
-        reminder = {
+        reminder = normalize_reminder_payload(
+            {
             "id": str(uuid.uuid4()),
             "title": title,
             "message": message,
             "start_time": current_time.isoformat(),
             "target_time": target_time.isoformat(),
             "status": STATUS_ACTIVE,
-            "notify_mobile": True,
-            "notify_persistent": True,
+            "notify_mobile": call.data.get("notify_mobile", True),
+            "notify_persistent": call.data.get("notify_persistent", True),
+            "target_user_ids": call.data.get("target_user_ids"),
+            "notify_targets": call.data.get("notify_targets"),
             "notified": False,
-        }
-        await storage.add_reminder(reminder)
+        },
+            call.context.user_id,
+        )
+        await storage.add_reminders(split_reminder_per_user(reminder, lambda: str(uuid.uuid4())))
 
     async def handle_update_service(call):
         reminder_id = call.data.get("id")
@@ -121,6 +132,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
         if not isinstance(updates, dict):
             raise ValueError("updates must be an object")
+
+        updates = normalize_reminder_updates(updates)
 
         if "target_time" in updates:
             _parse_future_target_time(updates["target_time"])
@@ -228,44 +241,46 @@ async def _send_notification(hass, reminder, notify_service):
             )
 
     if reminder.get("notify_mobile"):
-        try:
-            domain, service = (
-                notify_service.split(".", 1)
-                if "." in notify_service
-                else ("notify", "notify")
-            )
-            await hass.services.async_call(
-                domain,
-                service,
-                {
-                    "title": title,
-                    "message": message,
-                },
-                blocking=True,
-            )
-        except Exception as e:
-            _LOGGER.warning(
-                "Failed to send mobile notification using %s: %s. Sending persistent notification instead.",
-                notify_service,
-                e,
-            )
-            if not persistent_sent:
-                try:
-                    await hass.services.async_call(
-                        "persistent_notification",
-                        "create",
-                        {
-                            "message": f"Esec notificare telefon: {message}",
-                            "title": title,
-                            "notification_id": f"reminder_err_{reminder_id}",
-                        },
-                        blocking=True,
-                    )
-                except Exception:
-                    _LOGGER.exception(
-                        "Failed to create fallback persistent notification for reminder %s.",
-                        reminder_id,
-                    )
+        notify_targets = reminder_targets(reminder) or [notify_service]
+        for target in notify_targets:
+            try:
+                domain, service = (
+                    target.split(".", 1)
+                    if "." in target
+                    else ("notify", "notify")
+                )
+                await hass.services.async_call(
+                    domain,
+                    service,
+                    {
+                        "title": title,
+                        "message": message,
+                    },
+                    blocking=True,
+                )
+            except Exception as e:
+                _LOGGER.warning(
+                    "Failed to send mobile notification using %s: %s. Sending persistent notification instead.",
+                    target,
+                    e,
+                )
+                if not persistent_sent:
+                    try:
+                        await hass.services.async_call(
+                            "persistent_notification",
+                            "create",
+                            {
+                                "message": f"Esec notificare telefon: {message}",
+                                "title": title,
+                                "notification_id": f"reminder_err_{reminder_id}",
+                            },
+                            blocking=True,
+                        )
+                    except Exception:
+                        _LOGGER.exception(
+                            "Failed to create fallback persistent notification for reminder %s.",
+                            reminder_id,
+                        )
 
 
 async def _process_due_reminders(
