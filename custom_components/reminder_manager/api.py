@@ -107,6 +107,7 @@ class ReminderManagerAPI(HomeAssistantView):
                 return self.json({"error": str(err)}, status_code=400)
 
             reminder.setdefault("pre_notified", False)
+            reminder.setdefault("pre_notification_bucket", None)
             reminder.setdefault("next_occurrence_scheduled", False)
             reminder = enrich_repeat_metadata(reminder, target_time)
 
@@ -150,6 +151,7 @@ class ReminderManagerAPI(HomeAssistantView):
                     updates.setdefault("status", "active")
                     updates.setdefault("notified", False)
                     updates.setdefault("pre_notified", False)
+                    updates.setdefault("pre_notification_bucket", None)
 
                 if "target_time" in updates or "repeat" in updates:
                     effective_target_time = target_time if "target_time" in updates else _parse_target_time(

@@ -42,10 +42,43 @@ def normalize_repeat(value: Any) -> str:
     return repeat
 
 
+def normalize_repeat_day(value: Any) -> int | None:
+    """Normalize repeat day metadata."""
+    if value in (None, ""):
+        return None
+
+    try:
+        day = int(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError("repeat_day must be an integer") from err
+
+    if day < 1 or day > 31:
+        raise ValueError("repeat_day must be between 1 and 31")
+
+    return day
+
+
+def normalize_repeat_time(value: Any) -> str | None:
+    """Normalize repeat time metadata."""
+    if value in (None, ""):
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("repeat_time must be a string")
+
+    parsed = dt_util.parse_time(value)
+    if parsed is None:
+        raise ValueError("repeat_time must be a valid time")
+
+    return parsed.replace(microsecond=0).isoformat()
+
+
 def normalize_reminder_payload(reminder: dict[str, Any], owner_user_id: str | None) -> dict[str, Any]:
     """Normalize a full reminder payload coming from the API/UI."""
     normalized = dict(reminder)
     normalized["repeat"] = normalize_repeat(normalized.get("repeat"))
+    normalized["repeat_day"] = normalize_repeat_day(normalized.get("repeat_day"))
+    normalized["repeat_time"] = normalize_repeat_time(normalized.get("repeat_time"))
     normalized["target_user_ids"] = normalize_user_ids(normalized.get("target_user_ids"))
     normalized["notify_targets"] = normalize_notify_targets(normalized.get("notify_targets"))
 
@@ -64,6 +97,12 @@ def normalize_reminder_updates(updates: dict[str, Any]) -> dict[str, Any]:
 
     if "repeat" in normalized:
         normalized["repeat"] = normalize_repeat(normalized.get("repeat"))
+
+    if "repeat_day" in normalized:
+        normalized["repeat_day"] = normalize_repeat_day(normalized.get("repeat_day"))
+
+    if "repeat_time" in normalized:
+        normalized["repeat_time"] = normalize_repeat_time(normalized.get("repeat_time"))
 
     if "target_user_ids" in normalized:
         normalized["target_user_ids"] = normalize_user_ids(normalized.get("target_user_ids"))
@@ -100,9 +139,12 @@ def enrich_repeat_metadata(reminder: dict[str, Any], target_time: datetime) -> d
     normalized["repeat"] = repeat
 
     if repeat == REPEAT_MONTHLY:
-        local_target = dt_util.as_local(target_time)
-        normalized["repeat_day"] = local_target.day
-        normalized["repeat_time"] = local_target.time().replace(microsecond=0).isoformat()
+        local_target = _to_local_datetime(target_time)
+        normalized["repeat_day"] = normalize_repeat_day(normalized.get("repeat_day")) or local_target.day
+        normalized["repeat_time"] = (
+            normalize_repeat_time(normalized.get("repeat_time"))
+            or local_target.time().replace(microsecond=0).isoformat()
+        )
     else:
         normalized.pop("repeat_day", None)
         normalized.pop("repeat_time", None)
@@ -125,18 +167,19 @@ def build_next_monthly_reminder(
     next_target = next_monthly_target(reminder, current_target_time)
     next_reminder = dict(reminder)
     next_reminder["id"] = new_id_factory()
-    next_reminder["start_time"] = dt_util.as_local(start_time).isoformat()
+    next_reminder["start_time"] = _to_local_datetime(start_time).isoformat()
     next_reminder["target_time"] = next_target.isoformat()
     next_reminder["status"] = "active"
     next_reminder["notified"] = False
     next_reminder["pre_notified"] = False
+    next_reminder["pre_notification_bucket"] = None
     next_reminder["next_occurrence_scheduled"] = False
     return next_reminder
 
 
 def next_monthly_target(reminder: dict[str, Any], current_target_time: datetime) -> datetime:
     """Return the next monthly target while keeping the configured day and time."""
-    local_current = dt_util.as_local(current_target_time)
+    local_current = _to_local_datetime(current_target_time)
     repeat_day = reminder.get("repeat_day", local_current.day)
 
     try:
@@ -166,6 +209,13 @@ def next_monthly_target(reminder: dict[str, Any], current_target_time: datetime)
         second=second,
         microsecond=0,
     )
+
+
+def _to_local_datetime(value: datetime) -> datetime:
+    """Convert a datetime to Home Assistant's configured local timezone."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt_util.UTC)
+    return value.astimezone(dt_util.DEFAULT_TIME_ZONE)
 
 
 def split_reminder_per_user(

@@ -438,6 +438,36 @@ class ReminderManagerPanel extends HTMLElement {
     return repeat === "monthly" ? "Lunar" : "O singura data";
   }
 
+  formatDurationParts(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const units = [
+      { size: 30 * 24 * 60 * 60, singular: "luna", plural: "luni" },
+      { size: 24 * 60 * 60, singular: "zi", plural: "zile" },
+      { size: 60 * 60, singular: "ora", plural: "ore" },
+      { size: 60, singular: "minut", plural: "minute" },
+      { size: 1, singular: "secunda", plural: "secunde" }
+    ];
+
+    let remaining = seconds;
+    const parts = [];
+
+    units.forEach((unit) => {
+      if (parts.length >= 2) {
+        return;
+      }
+
+      const amount = Math.floor(remaining / unit.size);
+      if (amount <= 0) {
+        return;
+      }
+
+      parts.push(`${amount} ${amount === 1 ? unit.singular : unit.plural}`);
+      remaining -= amount * unit.size;
+    });
+
+    return parts.length > 0 ? parts.join(" ") : "0 secunde";
+  }
+
   openForm(reminder = null) {
     this.editingId = reminder ? reminder.id : null;
     this.shadowRoot.getElementById("form-title").textContent = reminder ? "Editeaza Reminder" : "Adauga Reminder Nou";
@@ -528,16 +558,27 @@ class ReminderManagerPanel extends HTMLElement {
       }
     }
 
+    const repeatMetadata = mode === "datetime"
+      ? {
+          repeat_day: parseInt(this.shadowRoot.getElementById("input-date").value.slice(-2), 10),
+          repeat_time: `${this.shadowRoot.getElementById("input-time").value}:00`
+        }
+      : {
+          repeat_day: null,
+          repeat_time: null
+        };
+
     if (this.editingId) {
       this.performAction("update", { 
         id: this.editingId, 
         updates: { 
           title, message, target_time: targetTime.toISOString(), 
           repeat,
+          ...repeatMetadata,
           notify_mobile: mobile, notify_persistent: persistent,
           target_user_ids: targetUserIds,
           notify_targets: notifyTargets,
-          status: "active", notified: false, pre_notified: false
+          status: "active", notified: false, pre_notified: false, pre_notification_bucket: null
         } 
       });
     } else {
@@ -548,12 +589,14 @@ class ReminderManagerPanel extends HTMLElement {
         target_time: targetTime.toISOString(),
         status: "active",
         repeat,
+        ...repeatMetadata,
         notify_mobile: mobile,
         notify_persistent: persistent,
         target_user_ids: targetUserIds.length > 0 ? targetUserIds : this.getDefaultTargetUserIds(),
         notify_targets: notifyTargets,
         notified: false,
-        pre_notified: false
+        pre_notified: false,
+        pre_notification_bucket: null
       };
       this.performAction("add", { reminder });
     }
@@ -696,21 +739,12 @@ class ReminderManagerPanel extends HTMLElement {
       const remaining = target - now;
 
       if (remaining <= 0) {
-        cdEl.textContent = "Expirat!";
+        cdEl.textContent = `Expirat de ${this.formatDurationParts(Math.abs(remaining) / 1000)}`;
         cdEl.style.color = "var(--error-color, red)";
         pbEl.style.width = "100%";
         pbEl.className = "progress-bar red";
       } else {
-        const d = Math.floor(remaining / (1000 * 60 * 60 * 24));
-        const h = Math.floor((remaining / (1000 * 60 * 60)) % 24);
-        const m = Math.floor((remaining / 1000 / 60) % 60);
-        const s = Math.floor((remaining / 1000) % 60);
-        
-        let cdText = "";
-        if (d > 0) cdText += `${d}z `;
-        if (h > 0 || d > 0) cdText += `${h}h `;
-        cdText += `${m}m ${s}s ramase`;
-        cdEl.textContent = cdText;
+        cdEl.textContent = `${this.formatDurationParts(remaining / 1000)} ramase`;
         cdEl.style.color = "";
 
         let percent = (elapsed / total) * 100;

@@ -170,6 +170,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 "notify_targets": call.data.get("notify_targets"),
                 "notified": False,
                 "pre_notified": False,
+                "pre_notification_bucket": None,
                 "next_occurrence_scheduled": False,
             },
             call.context.user_id,
@@ -199,6 +200,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             updates.setdefault("status", STATUS_ACTIVE)
             updates.setdefault("notified", False)
             updates.setdefault("pre_notified", False)
+            updates.setdefault("pre_notification_bucket", None)
 
         if target_time or "repeat" in updates:
             effective_target_time_str = updates.get("target_time", stored_reminder.get("target_time"))
@@ -291,6 +293,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 "status": STATUS_ACTIVE,
                 "notified": False,
                 "pre_notified": False,
+                "pre_notification_bucket": None,
             },
         )
         if not updated:
@@ -341,6 +344,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                     "status": STATUS_ACTIVE,
                     "notified": False,
                     "pre_notified": False,
+                    "pre_notification_bucket": None,
                 },
             )
 
@@ -423,6 +427,7 @@ async def _send_mobile_notification(
     message: str,
     *,
     countdown_seconds: int | None = None,
+    silent_update: bool = False,
 ):
     """Send a mobile notification to one configured notify target."""
     reminder_id = reminder.get("id")
@@ -433,6 +438,13 @@ async def _send_mobile_notification(
         "persistent": True,
         "actions": _build_notification_actions(reminder_id),
     }
+
+    if silent_update:
+        data["alert_once"] = True
+        data["push"] = {
+            "sound": "none",
+            "interruption-level": "passive",
+        }
 
     if countdown_seconds is not None and countdown_seconds > 0:
         data.update(
@@ -477,6 +489,7 @@ async def _send_pre_notification(hass, reminder, notify_service, remaining_secon
                 f"{title} in curand",
                 f"{message} Mai sunt aproximativ {minutes_left} minute.",
                 countdown_seconds=remaining_seconds,
+                silent_update=True,
             )
         except Exception:
             _LOGGER.exception(
@@ -572,14 +585,17 @@ async def _process_due_reminders(
 
             target_time_utc = dt_util.as_utc(target_time)
             remaining_seconds = int((target_time_utc - current_time).total_seconds())
+            current_bucket = max(1, (remaining_seconds + 59) // 60) if remaining_seconds > 0 else None
 
             if (
                 reminder.get("notify_mobile")
-                and not reminder.get("pre_notified")
+                and current_bucket is not None
                 and 0 < remaining_seconds <= int(_PRE_NOTIFICATION_WINDOW.total_seconds())
+                and reminder.get("pre_notification_bucket") != current_bucket
             ):
                 await _send_pre_notification(hass, reminder, notify_service, remaining_seconds)
                 reminder["pre_notified"] = True
+                reminder["pre_notification_bucket"] = current_bucket
                 needs_save = True
 
             if current_time >= target_time_utc:
@@ -597,6 +613,7 @@ async def _process_due_reminders(
                 await _send_notification(hass, reminder, notify_service)
                 reminder["status"] = STATUS_EXPIRED
                 reminder["notified"] = True
+                reminder["pre_notification_bucket"] = None
                 needs_save = True
         except Exception:
             _LOGGER.exception(

@@ -1,17 +1,17 @@
 {
   "domain": "reminder_manager",
   "name": "Reminder Manager",
-  "version": "1.2.0",
-  "documentation": "https://github.com/nickushorul/reminder_manager",
-  "issue_tracker": "https://github.com/nickushorul/reminder_manager/issues",
+  "codeowners": [
+    "@nickushorul"
+  ],
+  "config_flow": true,
   "dependencies": [
     "frontend",
     "http"
   ],
-  "codeowners": [
-    "@nickushorul"
-  ],
-  "requirements": [],
+  "documentation": "https://github.com/nickushorul/reminder_manager",
   "iot_class": "local_push",
-  "config_flow": true
+  "issue_tracker": "https://github.com/nickushorul/reminder_manager/issues",
+  "requirements": [],
+  "version": "1.2.1"
 }
