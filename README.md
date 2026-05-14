@@ -37,3 +37,20 @@ Important:
    `/config/custom_components/reminder_manager`
 2. Restarteaza Home Assistant.
 3. Adauga integrarea din `Settings -> Devices & Services`.
+
+## Update componenta
+Pentru utilizatori:
+1. Deschide HACS.
+2. Daca apare `Pending update`, apasa `Update` sau `Redownload`.
+3. Restarteaza Home Assistant dupa update.
+
+Pentru dezvoltare/publicare:
+1. Modifica codul.
+2. Creste `version` in `custom_components/reminder_manager/manifest.json`.
+3. Commit + push pe `main`.
+4. Creeaza un GitHub Release, de exemplu `v1.0.1`.
+
+Cum functioneaza:
+- daca publici GitHub Releases, HACS foloseste release-ul cel mai nou pentru versiune si update-uri
+- daca nu publici release-uri, HACS foloseste branch-ul default si versiunea remota va fi bazata pe commit
+- workflow-urile GitHub Actions din `.github/workflows/` valideaza structura HACS si integrarea Home Assistant

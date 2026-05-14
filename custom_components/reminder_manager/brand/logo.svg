@@ -1,0 +1,23 @@
+<svg width="1024" height="512" viewBox="0 0 1024 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoBg" x1="56" y1="56" x2="968" y2="456" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+  </defs>
+  <rect x="56" y="56" width="912" height="400" rx="120" fill="url(#logoBg)"/>
+  <rect x="132" y="104" width="304" height="304" rx="76" fill="#0B5E58" fill-opacity="0.28"/>
+  <rect x="172" y="150" width="174" height="152" rx="28" fill="#F8FAFC"/>
+  <rect x="172" y="150" width="174" height="42" rx="28" fill="#0D9488"/>
+  <circle cx="212" cy="150" r="12" fill="#CCFBF1"/>
+  <circle cx="306" cy="150" r="12" fill="#CCFBF1"/>
+  <rect x="198" y="216" width="86" height="14" rx="7" fill="#99F6E4"/>
+  <rect x="198" y="244" width="120" height="14" rx="7" fill="#CCFBF1"/>
+  <rect x="198" y="272" width="74" height="14" rx="7" fill="#CCFBF1"/>
+  <circle cx="338" cy="314" r="62" fill="#F97316"/>
+  <circle cx="338" cy="314" r="42" fill="#FFF7ED"/>
+  <path d="M338 290V316L356 327" stroke="#EA580C" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="338" cy="314" r="7" fill="#EA580C"/>
+  <text x="504" y="244" fill="#F8FAFC" font-size="84" font-family="Helvetica, Arial, sans-serif" font-weight="700">Reminder</text>
+  <text x="504" y="328" fill="#CCFBF1" font-size="84" font-family="Helvetica, Arial, sans-serif" font-weight="700">Manager</text>
+</svg>
