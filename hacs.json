@@ -1,0 +1,7 @@
+{
+  "name": "Reminder Manager",
+  "content_in_root": false,
+  "country": "RO",
+  "homeassistant": "2025.1.0",
+  "render_readme": true
+}

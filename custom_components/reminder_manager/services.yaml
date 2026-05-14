@@ -1,0 +1,79 @@
+create:
+  name: "Create Reminder"
+  description: "Creeaza un reminder nou."
+  fields:
+    title:
+      name: "Titlu"
+      description: "Nume reminder"
+      required: true
+      selector:
+        text:
+    message:
+      name: "Mesaj"
+      description: "Mesaj notificare"
+      required: true
+      selector:
+        text:
+    target_time:
+      name: "Target Time"
+      description: "Data si ora limita"
+      required: false
+      selector:
+        text:
+    duration_minutes:
+      name: "Durata in minute"
+      description: "Peste cate minute (ignorat daca exista target_time)"
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1440
+update:
+  name: "Update Reminder"
+  description: "Actualizeaza un reminder existent."
+  fields:
+    id:
+      name: "ID"
+      description: "ID reminder"
+      required: true
+      selector:
+        text:
+delete:
+  name: "Delete Reminder"
+  description: "Sterge un reminder."
+  fields:
+    id:
+      name: "ID"
+      description: "ID reminder"
+      required: true
+      selector:
+        text:
+done:
+  name: "Mark Done"
+  description: "Marcheaza reminderul ca finalizat."
+  fields:
+    id:
+      name: "ID"
+      description: "ID reminder"
+      required: true
+      selector:
+        text:
+snooze:
+  name: "Snooze Reminder"
+  description: "Amana reminderul."
+  fields:
+    id:
+      name: "ID"
+      description: "ID reminder"
+      required: true
+      selector:
+        text:
+    minutes:
+      name: "Minute"
+      description: "Cate minute amani?"
+      required: false
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 10000
