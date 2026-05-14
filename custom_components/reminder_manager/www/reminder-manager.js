@@ -231,7 +231,7 @@ class ReminderManagerPanel extends HTMLElement {
         }
         .reminders-grid {
           display: grid;
-          grid-template-columns: 1fr;
+          grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
           gap: 18px;
         }
         .reminder-card {
@@ -434,9 +434,6 @@ class ReminderManagerPanel extends HTMLElement {
           }
         }
         @media (min-width: 800px) {
-          .reminders-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
         }
       </style>
       
