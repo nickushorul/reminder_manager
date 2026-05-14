@@ -15,6 +15,7 @@ from .storage import ReminderStorage
 
 _LOGGER = logging.getLogger(__name__)
 _DEFAULT_NOTIFY_SERVICE = "notify.notify"
+_CHECK_INTERVAL = datetime.timedelta(seconds=15)
 
 
 def _get_notify_service(entry: ConfigEntry) -> str:
@@ -77,32 +78,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     async def check_reminders(_now):
-        reminders = storage.get_reminders()
-        needs_save = False
-        current_time = dt_util.now()
         notify_service = domain_data.get("notify_service", _DEFAULT_NOTIFY_SERVICE)
+        await _process_due_reminders(hass, storage, notify_service)
 
-        for r in reminders:
-            if r.get("status") == STATUS_ACTIVE:
-                target_time_str = r.get("target_time")
-                if target_time_str:
-                    try:
-                        target_time = dt_util.parse_datetime(target_time_str)
-                        if target_time and current_time >= target_time:
-                            # Notifica si apoi marcheaza ca notificat (sa incerce chiar daca pica).
-                            await _send_notification(hass, r, notify_service)
-                            r["status"] = STATUS_EXPIRED
-                            r["notified"] = True
-                            needs_save = True
-                    except Exception as e:
-                        _LOGGER.error(f"Error parsing date {target_time_str}: {e}")
-
-        if needs_save:
-            await storage.async_save()
-
-    entry.async_on_unload(
-        async_track_time_interval(hass, check_reminders, datetime.timedelta(minutes=1))
-    )
+    entry.async_on_unload(async_track_time_interval(hass, check_reminders, _CHECK_INTERVAL))
+    hass.async_create_task(check_reminders(None))
 
     async def handle_create_service(call):
         title = call.data.get("title", "New Reminder")
@@ -225,11 +205,27 @@ async def _send_notification(hass, reminder, notify_service):
     """Send notification for expired reminder."""
     title = reminder.get("title", "Reminder")
     message = reminder.get("message", "Reminder expired!")
+    reminder_id = reminder.get("id")
+    persistent_sent = False
 
     if reminder.get("notify_persistent"):
-        hass.components.persistent_notification.async_create(
-            message, title=title, notification_id=f"reminder_{reminder.get('id')}"
-        )
+        try:
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": message,
+                    "title": title,
+                    "notification_id": f"reminder_{reminder_id}",
+                },
+                blocking=True,
+            )
+            persistent_sent = True
+        except Exception:
+            _LOGGER.exception(
+                "Failed to create persistent notification for reminder %s.",
+                reminder_id,
+            )
 
     if reminder.get("notify_mobile"):
         try:
@@ -245,6 +241,7 @@ async def _send_notification(hass, reminder, notify_service):
                     "title": title,
                     "message": message,
                 },
+                blocking=True,
             )
         except Exception as e:
             _LOGGER.warning(
@@ -252,8 +249,57 @@ async def _send_notification(hass, reminder, notify_service):
                 notify_service,
                 e,
             )
-            hass.components.persistent_notification.async_create(
-                f"Esec notificare telefon: {message}",
-                title=title,
-                notification_id=f"reminder_err_{reminder.get('id')}",
+            if not persistent_sent:
+                try:
+                    await hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "message": f"Esec notificare telefon: {message}",
+                            "title": title,
+                            "notification_id": f"reminder_err_{reminder_id}",
+                        },
+                        blocking=True,
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Failed to create fallback persistent notification for reminder %s.",
+                        reminder_id,
+                    )
+
+
+async def _process_due_reminders(
+    hass: HomeAssistant, storage: ReminderStorage, notify_service: str
+) -> None:
+    """Process active reminders and notify for due items."""
+    reminders = storage.get_reminders()
+    needs_save = False
+    current_time = dt_util.utcnow()
+
+    for reminder in reminders:
+        if reminder.get("status") != STATUS_ACTIVE or reminder.get("notified"):
+            continue
+
+        target_time_str = reminder.get("target_time")
+        if not target_time_str:
+            continue
+
+        try:
+            target_time = dt_util.parse_datetime(target_time_str)
+            if not target_time:
+                raise ValueError("Invalid target_time format")
+
+            if current_time >= dt_util.as_utc(target_time):
+                await _send_notification(hass, reminder, notify_service)
+                reminder["status"] = STATUS_EXPIRED
+                reminder["notified"] = True
+                needs_save = True
+        except Exception:
+            _LOGGER.exception(
+                "Failed to process reminder %s with target_time=%s.",
+                reminder.get("id"),
+                target_time_str,
             )
+
+    if needs_save:
+        await storage.async_save()
