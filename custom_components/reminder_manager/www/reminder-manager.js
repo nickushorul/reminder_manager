@@ -113,10 +113,11 @@ class ReminderManagerPanel extends HTMLElement {
         }
         .card {
           background-color: var(--card-background-color, white);
-          border-radius: 8px;
-          padding: 16px;
+          border-radius: 14px;
+          padding: 18px;
           margin-bottom: 16px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          box-shadow: 0 10px 26px rgba(0,0,0,0.08);
+          border: 1px solid rgba(127, 127, 127, 0.14);
         }
         .form-group {
           margin-bottom: 16px;
@@ -146,9 +147,8 @@ class ReminderManagerPanel extends HTMLElement {
         .progress-bar-container {
           width: 100%;
           background-color: var(--secondary-background-color);
-          border-radius: 4px;
+          border-radius: 999px;
           height: 8px;
-          margin-top: 8px;
           overflow: hidden;
         }
         .progress-bar {
@@ -166,24 +166,26 @@ class ReminderManagerPanel extends HTMLElement {
         .reminder-actions {
           display: flex;
           gap: 8px;
-          margin-top: 12px;
           align-items: center;
           flex-wrap: wrap;
         }
         .reminder-title {
-          font-size: 18px;
+          font-size: 28px;
           font-weight: bold;
-          margin-bottom: 4px;
+          line-height: 1.1;
+        }
+        .reminder-message {
+          font-size: 16px;
+          color: var(--secondary-text-color);
         }
         .reminder-meta {
           font-size: 14px;
           color: var(--secondary-text-color);
-          margin-bottom: 8px;
         }
         .countdown {
           font-weight: bold;
           font-family: monospace;
-          font-size: 16px;
+          font-size: 20px;
         }
         .tabs {
           display: flex;
@@ -208,6 +210,133 @@ class ReminderManagerPanel extends HTMLElement {
         .snooze-wrapper select {
           width: auto;
           padding: 6px;
+        }
+        .reminders-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 18px;
+        }
+        .reminder-card {
+          position: relative;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0)),
+            var(--card-background-color, white);
+          border-radius: 18px;
+          padding: 20px;
+          border: 1px solid rgba(127, 127, 127, 0.15);
+          box-shadow: 0 14px 36px rgba(0,0,0,0.08);
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          min-height: 100%;
+        }
+        .reminder-card.status-active {
+          border-top: 4px solid var(--primary-color);
+        }
+        .reminder-card.status-expired {
+          border-top: 4px solid var(--error-color);
+        }
+        .reminder-card.status-done {
+          border-top: 4px solid var(--success-color, #2e7d32);
+        }
+        .reminder-card-header {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .reminder-status-badge {
+          display: inline-flex;
+          align-self: flex-start;
+          align-items: center;
+          padding: 6px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+        .status-badge-active {
+          background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+          color: var(--primary-color);
+        }
+        .status-badge-expired {
+          background: color-mix(in srgb, var(--error-color) 14%, transparent);
+          color: var(--error-color);
+        }
+        .status-badge-done {
+          background: color-mix(in srgb, var(--success-color, #2e7d32) 14%, transparent);
+          color: var(--success-color, #2e7d32);
+        }
+        .reminder-meta-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .reminder-meta-card {
+          background: color-mix(in srgb, var(--primary-background-color) 58%, transparent);
+          border: 1px solid rgba(127, 127, 127, 0.12);
+          border-radius: 12px;
+          padding: 10px 12px;
+          min-width: 0;
+        }
+        .reminder-meta-label {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          color: var(--secondary-text-color);
+          margin-bottom: 6px;
+        }
+        .reminder-meta-value {
+          font-size: 15px;
+          font-weight: 600;
+          line-height: 1.35;
+          word-break: break-word;
+        }
+        .reminder-timer-block {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding: 14px;
+          border-radius: 14px;
+          background: color-mix(in srgb, var(--primary-background-color) 68%, transparent);
+          border: 1px solid rgba(127, 127, 127, 0.12);
+        }
+        .reminder-timer-label {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          color: var(--secondary-text-color);
+        }
+        .empty-state {
+          padding: 28px;
+          border-radius: 18px;
+          border: 1px dashed rgba(127, 127, 127, 0.25);
+          color: var(--secondary-text-color);
+          text-align: center;
+          background: color-mix(in srgb, var(--primary-background-color) 60%, transparent);
+        }
+        @media (max-width: 880px) {
+          .tabs {
+            flex-wrap: wrap;
+          }
+          .header {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 12px;
+          }
+          .reminder-title {
+            font-size: 24px;
+          }
+          .reminder-meta-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        @media (min-width: 1180px) {
+          .reminders-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
         }
       </style>
       
@@ -438,6 +567,13 @@ class ReminderManagerPanel extends HTMLElement {
     return repeat === "monthly" ? "Lunar" : "O singura data";
   }
 
+  formatStatusLabel(status) {
+    if (status === "active") return "Activ";
+    if (status === "expired") return "Expirat";
+    if (status === "done") return "Finalizat";
+    return status || "Necunoscut";
+  }
+
   formatDurationParts(totalSeconds) {
     const seconds = Math.max(0, Math.floor(totalSeconds));
     const units = [
@@ -607,6 +743,7 @@ class ReminderManagerPanel extends HTMLElement {
   renderReminders() {
     const container = this.shadowRoot.getElementById("reminders-container");
     container.innerHTML = "";
+    container.className = "";
 
     const filtered = this.reminders.filter(r => {
       if (this.currentTab === "active") return r.status === "active";
@@ -616,30 +753,53 @@ class ReminderManagerPanel extends HTMLElement {
     });
 
     if (filtered.length === 0) {
-      container.innerHTML = "<p>Nu exista remindere in aceasta categorie.</p>";
+      container.innerHTML = `<div class="empty-state">Nu exista remindere in aceasta categorie.</div>`;
       return;
     }
 
+    container.className = "reminders-grid";
+
     filtered.forEach(r => {
       const card = document.createElement("div");
-      card.className = "card";
+      card.className = `reminder-card status-${r.status}`;
       
       const targetTime = new Date(r.target_time);
+      const statusLabel = this.formatStatusLabel(r.status);
       
       let html = `
-        <div class="reminder-title">${r.title}</div>
-        <div class="reminder-meta">${r.message}</div>
-        <div class="reminder-meta">Tinta: ${targetTime.toLocaleString()} (${r.status})</div>
-        <div class="reminder-meta">Repetare: ${this.formatRepeatLabel(r.repeat)}</div>
-        <div class="reminder-meta">Utilizatori: ${this.formatUserNames(r.target_user_ids)}</div>
-        <div class="reminder-meta">Dispozitive: ${this.formatNotifyTargets(r.notify_targets)}</div>
+        <div class="reminder-card-header">
+          <div class="reminder-status-badge status-badge-${r.status}">${statusLabel}</div>
+          <div class="reminder-title">${r.title}</div>
+          <div class="reminder-message">${r.message}</div>
+        </div>
+        <div class="reminder-meta-grid">
+          <div class="reminder-meta-card">
+            <div class="reminder-meta-label">Tinta</div>
+            <div class="reminder-meta-value">${targetTime.toLocaleString()}</div>
+          </div>
+          <div class="reminder-meta-card">
+            <div class="reminder-meta-label">Repetare</div>
+            <div class="reminder-meta-value">${this.formatRepeatLabel(r.repeat)}</div>
+          </div>
+          <div class="reminder-meta-card">
+            <div class="reminder-meta-label">Utilizatori</div>
+            <div class="reminder-meta-value">${this.formatUserNames(r.target_user_ids)}</div>
+          </div>
+          <div class="reminder-meta-card">
+            <div class="reminder-meta-label">Dispozitive</div>
+            <div class="reminder-meta-value">${this.formatNotifyTargets(r.notify_targets)}</div>
+          </div>
+        </div>
       `;
 
       if (r.status === "active" || r.status === "expired") {
         html += `
-          <div class="countdown" id="cd-${r.id}"></div>
-          <div class="progress-bar-container">
-            <div class="progress-bar" id="pb-${r.id}"></div>
+          <div class="reminder-timer-block">
+            <div class="reminder-timer-label">Timp</div>
+            <div class="countdown" id="cd-${r.id}"></div>
+            <div class="progress-bar-container">
+              <div class="progress-bar" id="pb-${r.id}"></div>
+            </div>
           </div>
         `;
       }
