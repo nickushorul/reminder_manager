@@ -5,6 +5,7 @@ class ReminderManagerPanel extends HTMLElement {
     this.reminders = [];
     this.availableUsers = [];
     this.availableNotifyTargets = [];
+    this.availableZones = [];
     this.currentUser = null;
     this.intervalId = null;
     this.editingId = null;
@@ -33,6 +34,7 @@ class ReminderManagerPanel extends HTMLElement {
     try {
       const selectedUsers = this.getSelectedValues("input-users");
       const selectedNotifyTargets = this.getSelectedValues("input-notify-targets");
+      const selectedZone = this.shadowRoot.getElementById("input-zone-entity")?.value || "";
       const response = await this._hass.fetchWithAuth("/api/reminder_manager?include_meta=1");
       if (response.ok) {
         const payload = await response.json();
@@ -43,9 +45,14 @@ class ReminderManagerPanel extends HTMLElement {
           this.currentUser = payload.current_user || null;
           this.availableUsers = payload.available_users || [];
           this.availableNotifyTargets = payload.available_notify_targets || [];
+          this.availableZones = payload.available_zones || [];
           this.renderRecipientOptions();
           this.setSelectedValues("input-users", selectedUsers);
           this.setSelectedValues("input-notify-targets", selectedNotifyTargets);
+          const zoneSelect = this.shadowRoot.getElementById("input-zone-entity");
+          if (zoneSelect && selectedZone) {
+            zoneSelect.value = selectedZone;
+          }
         }
         this.renderReminders();
       }
@@ -462,47 +469,139 @@ class ReminderManagerPanel extends HTMLElement {
           <label>Mesaj notificare</label>
           <input type="text" id="input-message" required>
         </div>
+
         <div class="form-group">
-          <label>Tip reminder</label>
-          <select id="input-mode">
-            <option value="duration">dupa durata</option>
-            <option value="datetime">la data si ora</option>
+          <label>Cand se declanseaza</label>
+          <select id="input-trigger-type">
+            <option value="time">Doar timp</option>
+            <option value="location">Doar locatie</option>
+            <option value="time_and_location">Dupa o data, la o locatie</option>
           </select>
+          <div class="field-help">Pentru "Dupa o data, la o locatie": ex. "dupa 20 iunie, cand ajung la X".</div>
         </div>
-        
-        <div id="duration-fields">
+
+        <div id="time-trigger-fields">
           <div class="form-group">
-            <label>Zile</label>
-            <input type="number" id="input-days" value="0" min="0">
+            <label>Tip reminder</label>
+            <select id="input-mode">
+              <option value="duration">dupa durata</option>
+              <option value="datetime">la data si ora</option>
+            </select>
           </div>
-          <div class="form-group">
-            <label>Ore</label>
-            <input type="number" id="input-hours" value="0" min="0">
+
+          <div id="duration-fields">
+            <div class="form-group">
+              <label>Zile</label>
+              <input type="number" id="input-days" value="0" min="0">
+            </div>
+            <div class="form-group">
+              <label>Ore</label>
+              <input type="number" id="input-hours" value="0" min="0">
+            </div>
+            <div class="form-group">
+              <label>Minute</label>
+              <input type="number" id="input-minutes" value="10" min="0">
+            </div>
           </div>
+
+          <div id="datetime-fields" style="display:none; gap:16px;">
+            <div class="form-group" style="flex:1;">
+              <label>Data</label>
+              <input type="date" id="input-date">
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label>Ora</label>
+              <input type="time" id="input-time">
+            </div>
+          </div>
+
           <div class="form-group">
-            <label>Minute</label>
-            <input type="number" id="input-minutes" value="10" min="0">
+            <label>Repetare</label>
+            <select id="input-repeat">
+              <option value="none">fara repetare</option>
+              <option value="monthly">lunar la aceeasi data si ora</option>
+            </select>
+            <div class="field-help">Repetarea lunara functioneaza pentru remindere setate la data si ora fixa. Daca o luna are mai putine zile, reminderul ruleaza in ultima zi disponibila.</div>
           </div>
         </div>
 
-        <div id="datetime-fields" style="display:none; gap:16px;">
-          <div class="form-group" style="flex:1;">
-            <label>Data</label>
-            <input type="date" id="input-date">
+        <div id="location-trigger-fields" style="display:none;">
+          <div class="form-group">
+            <label>Sursa zonei</label>
+            <select id="input-zone-source">
+              <option value="ha_zone">Zona existenta din Home Assistant</option>
+              <option value="custom">Locatie noua (lat/lon)</option>
+            </select>
           </div>
-          <div class="form-group" style="flex:1;">
-            <label>Ora</label>
-            <input type="time" id="input-time">
+
+          <div id="ha-zone-fields">
+            <div class="form-group">
+              <label>Zona</label>
+              <select id="input-zone-entity"></select>
+              <div class="field-help">Zonele se gestioneaza din Settings &rarr; Areas, Zones &amp; Labels &rarr; Zones.</div>
+            </div>
+          </div>
+
+          <div id="custom-zone-fields" style="display:none;">
+            <div class="form-group">
+              <label>Nume locatie</label>
+              <input type="text" id="input-custom-zone-name" placeholder="ex. Auchan Vitan">
+            </div>
+
+            <div class="form-group">
+              <button type="button" id="btn-toggle-map" class="button-secondary">Alege pe harta</button>
+              <div class="field-help">Apasa "Alege pe harta", apoi click oriunde pentru a pune pinul. Poti trage si pinul.</div>
+            </div>
+
+            <div id="map-picker-wrapper" style="display:none;">
+              <div id="map-picker" style="height:340px;border-radius:12px;overflow:hidden;border:1px solid rgba(127,127,127,0.2);margin-bottom:8px;"></div>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+                <button type="button" id="btn-use-map">Foloseste locatia</button>
+                <button type="button" id="btn-close-map" class="button-secondary">Inchide harta</button>
+                <span id="map-coord-readout" class="field-help" style="margin:0;"></span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Latitudine</label>
+              <input type="number" step="0.000001" id="input-custom-zone-lat" placeholder="44.426300">
+            </div>
+            <div class="form-group">
+              <label>Longitudine</label>
+              <input type="number" step="0.000001" id="input-custom-zone-lon" placeholder="26.148700">
+            </div>
+            <div class="form-group">
+              <label>Raza (metri)</label>
+              <input type="number" id="input-custom-zone-radius" value="150" min="1" max="50000">
+              <div class="field-help">Cercul de pe harta se actualizeaza pe baza acestei valori.</div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Eveniment</label>
+            <select id="input-zone-event">
+              <option value="enter">Cand ajung in zona</option>
+              <option value="leave">Cand plec din zona</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label><input type="checkbox" id="input-location-recurring"> Reminder recurent (se reaprinde la fiecare intrare/iesire)</label>
+            <div class="field-help">Fara aceasta optiune, reminderul se declanseaza o singura data si trece in "Expirate".</div>
           </div>
         </div>
 
-        <div class="form-group">
-          <label>Repetare</label>
-          <select id="input-repeat">
-            <option value="none">fara repetare</option>
-            <option value="monthly">lunar la aceeasi data si ora</option>
-          </select>
-          <div class="field-help">Repetarea lunara functioneaza pentru remindere setate la data si ora fixa. Daca o luna are mai putine zile, reminderul ruleaza in ultima zi disponibila.</div>
+        <div id="active-window-fields" style="display:none;">
+          <div class="form-group">
+            <label>Activ incepand cu (optional)</label>
+            <input type="datetime-local" id="input-active-from">
+            <div class="field-help">Inainte de aceasta data reminderul nu se declanseaza chiar daca esti in zona.</div>
+          </div>
+          <div class="form-group">
+            <label>Activ pana la (optional)</label>
+            <input type="datetime-local" id="input-active-until">
+            <div class="field-help">Dupa aceasta data reminderul expira automat.</div>
+          </div>
         </div>
 
         <div class="form-group">
@@ -556,6 +655,16 @@ class ReminderManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById("input-mobile").addEventListener("change", () => {
       this.toggleNotifyTargetGroup();
     });
+    this.shadowRoot.getElementById("input-trigger-type").addEventListener("change", (e) => {
+      this.setTriggerType(e.target.value);
+    });
+    this.shadowRoot.getElementById("input-zone-source").addEventListener("change", (e) => {
+      this.setZoneSource(e.target.value);
+    });
+    this.shadowRoot.getElementById("btn-toggle-map").addEventListener("click", () => this.openMapPicker());
+    this.shadowRoot.getElementById("btn-close-map").addEventListener("click", () => this.closeMapPicker());
+    this.shadowRoot.getElementById("btn-use-map").addEventListener("click", () => this.applyMapLocation());
+    this.shadowRoot.getElementById("input-custom-zone-radius").addEventListener("input", () => this.refreshMapRadius());
 
     this.shadowRoot.getElementById("btn-save").addEventListener("click", () => this.saveReminder());
 
@@ -583,6 +692,160 @@ class ReminderManagerPanel extends HTMLElement {
       if (mode !== "datetime") {
         repeat.value = "none";
       }
+    }
+  }
+
+  setTriggerType(triggerType) {
+    this.shadowRoot.getElementById("input-trigger-type").value = triggerType;
+    const timeBlock = this.shadowRoot.getElementById("time-trigger-fields");
+    const locBlock = this.shadowRoot.getElementById("location-trigger-fields");
+    const activeBlock = this.shadowRoot.getElementById("active-window-fields");
+    timeBlock.style.display = triggerType === "time" ? "block" : "none";
+    locBlock.style.display = (triggerType === "location" || triggerType === "time_and_location") ? "block" : "none";
+    activeBlock.style.display = (triggerType === "location" || triggerType === "time_and_location") ? "block" : "none";
+  }
+
+  setZoneSource(source) {
+    this.shadowRoot.getElementById("input-zone-source").value = source;
+    this.shadowRoot.getElementById("ha-zone-fields").style.display = source === "ha_zone" ? "block" : "none";
+    this.shadowRoot.getElementById("custom-zone-fields").style.display = source === "custom" ? "block" : "none";
+  }
+
+  async _loadLeaflet() {
+    if (window.L) return window.L;
+    if (!ReminderManagerPanel._leafletPromise) {
+      const cssUrl = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      const jsUrl = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      ReminderManagerPanel._leafletPromise = (async () => {
+        const css = await fetch(cssUrl).then((r) => r.text());
+        ReminderManagerPanel._leafletCss = css;
+        await new Promise((resolve, reject) => {
+          if (document.querySelector(`script[data-rm-leaflet]`)) {
+            const wait = () => (window.L ? resolve() : setTimeout(wait, 50));
+            return wait();
+          }
+          const s = document.createElement("script");
+          s.src = jsUrl;
+          s.dataset.rmLeaflet = "1";
+          s.onload = resolve;
+          s.onerror = () => reject(new Error("Nu s-a putut incarca Leaflet (verifica internetul)."));
+          document.head.appendChild(s);
+        });
+        return window.L;
+      })();
+    }
+    return ReminderManagerPanel._leafletPromise;
+  }
+
+  _injectLeafletCss() {
+    if (this._leafletCssInjected) return;
+    const css = ReminderManagerPanel._leafletCss;
+    if (!css) return;
+    const style = document.createElement("style");
+    // Rewrite relative image urls so marker/layer icons load from CDN
+    style.textContent = css.replace(/url\((['"]?)images\//g, `url($1https://unpkg.com/leaflet@1.9.4/dist/images/`);
+    this.shadowRoot.appendChild(style);
+    this._leafletCssInjected = true;
+  }
+
+  _initialMapCenter() {
+    const latInput = parseFloat(this.shadowRoot.getElementById("input-custom-zone-lat").value);
+    const lonInput = parseFloat(this.shadowRoot.getElementById("input-custom-zone-lon").value);
+    if (!Number.isNaN(latInput) && !Number.isNaN(lonInput)) {
+      return [latInput, lonInput];
+    }
+    if (this._hass && this._hass.config) {
+      const { latitude, longitude } = this._hass.config;
+      if (typeof latitude === "number" && typeof longitude === "number") {
+        return [latitude, longitude];
+      }
+    }
+    return [44.4361414, 26.102684];
+  }
+
+  _readRadius() {
+    const radius = parseFloat(this.shadowRoot.getElementById("input-custom-zone-radius").value);
+    if (Number.isNaN(radius) || radius <= 0) return 150;
+    return Math.min(radius, 50000);
+  }
+
+  async openMapPicker() {
+    const wrapper = this.shadowRoot.getElementById("map-picker-wrapper");
+    wrapper.style.display = "block";
+    try {
+      const L = await this._loadLeaflet();
+      this._injectLeafletCss();
+      const center = this._initialMapCenter();
+      const radius = this._readRadius();
+
+      if (!this._map) {
+        // Leaflet's default marker resolves image URLs via getComputedStyle on
+        // a probe div; that fails inside a Shadow DOM, so we pin the icons to
+        // the same CDN serving the CSS.
+        const iconBase = "https://unpkg.com/leaflet@1.9.4/dist/images/";
+        delete L.Icon.Default.prototype._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: `${iconBase}marker-icon-2x.png`,
+          iconUrl: `${iconBase}marker-icon.png`,
+          shadowUrl: `${iconBase}marker-shadow.png`,
+        });
+
+        const container = this.shadowRoot.getElementById("map-picker");
+        this._map = L.map(container, { zoomControl: true }).setView(center, 14);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap',
+        }).addTo(this._map);
+
+        this._marker = L.marker(center, { draggable: true }).addTo(this._map);
+        this._circle = L.circle(center, { radius, color: "#03a9f4", weight: 2, fillOpacity: 0.12 }).addTo(this._map);
+
+        this._marker.on("drag", () => {
+          const { lat, lng } = this._marker.getLatLng();
+          this._circle.setLatLng([lat, lng]);
+          this._updateMapReadout(lat, lng);
+        });
+        this._map.on("click", (e) => {
+          this._marker.setLatLng(e.latlng);
+          this._circle.setLatLng(e.latlng);
+          this._updateMapReadout(e.latlng.lat, e.latlng.lng);
+        });
+      } else {
+        this._marker.setLatLng(center);
+        this._circle.setLatLng(center).setRadius(radius);
+        this._map.setView(center, this._map.getZoom() || 14);
+      }
+      this._updateMapReadout(center[0], center[1]);
+      // Container was hidden when map was created — fix tile rendering
+      setTimeout(() => this._map.invalidateSize(), 50);
+    } catch (err) {
+      wrapper.style.display = "none";
+      alert(err.message || "Eroare la incarcarea hartii.");
+    }
+  }
+
+  closeMapPicker() {
+    this.shadowRoot.getElementById("map-picker-wrapper").style.display = "none";
+  }
+
+  applyMapLocation() {
+    if (!this._marker) return;
+    const { lat, lng } = this._marker.getLatLng();
+    this.shadowRoot.getElementById("input-custom-zone-lat").value = lat.toFixed(6);
+    this.shadowRoot.getElementById("input-custom-zone-lon").value = lng.toFixed(6);
+    this.closeMapPicker();
+  }
+
+  refreshMapRadius() {
+    if (this._circle) {
+      this._circle.setRadius(this._readRadius());
+    }
+  }
+
+  _updateMapReadout(lat, lng) {
+    const el = this.shadowRoot.getElementById("map-coord-readout");
+    if (el) {
+      el.textContent = `Pin: ${lat.toFixed(6)}, ${lng.toFixed(6)} (raza ${this._readRadius()}m)`;
     }
   }
 
@@ -622,6 +885,7 @@ class ReminderManagerPanel extends HTMLElement {
   renderRecipientOptions() {
     this.renderSelectOptions("input-users", this.availableUsers, "id", "name", "Nu exista utilizatori disponibili.");
     this.renderSelectOptions("input-notify-targets", this.availableNotifyTargets, "service", "label", "Nu exista servicii notify disponibile.");
+    this.renderSelectOptions("input-zone-entity", this.availableZones, "entity_id", "name", "Nu exista zone definite in Home Assistant.");
   }
 
   renderSelectOptions(elementId, items, valueKey, labelKey, emptyLabel) {
@@ -676,6 +940,23 @@ class ReminderManagerPanel extends HTMLElement {
 
   formatRepeatLabel(repeat) {
     return repeat === "monthly" ? "Lunar" : "O singura data";
+  }
+
+  formatLocationSummary(reminder) {
+    if (reminder.custom_zone && reminder.custom_zone.name) {
+      const radius = reminder.custom_zone.radius != null ? `, ${reminder.custom_zone.radius}m` : "";
+      return `${reminder.custom_zone.name}${radius}`;
+    }
+    if (reminder.zone_entity_id) {
+      const match = this.availableZones.find((z) => z.entity_id === reminder.zone_entity_id);
+      return match ? match.name : reminder.zone_entity_id;
+    }
+    return "fara zona";
+  }
+
+  formatZoneEventLabel(reminder) {
+    const event = reminder.zone_event === "leave" ? "Cand plec" : "Cand ajung";
+    return reminder.location_recurring ? `${event} (recurent)` : event;
   }
 
   escapeAttribute(value) {
@@ -748,7 +1029,7 @@ class ReminderManagerPanel extends HTMLElement {
   openForm(reminder = null) {
     this.editingId = reminder ? reminder.id : null;
     this.shadowRoot.getElementById("form-title").textContent = reminder ? "Editeaza Reminder" : "Adauga Reminder Nou";
-    
+
     this.shadowRoot.getElementById("input-title").value = reminder ? reminder.title : "";
     this.shadowRoot.getElementById("input-message").value = reminder ? reminder.message : "";
     this.shadowRoot.getElementById("input-mobile").checked = reminder ? reminder.notify_mobile : true;
@@ -766,7 +1047,33 @@ class ReminderManagerPanel extends HTMLElement {
     this.setSelectedValues("input-notify-targets", reminder ? (reminder.notify_targets || []) : []);
     this.toggleNotifyTargetGroup();
 
-    if (reminder && reminder.target_time) {
+    // Trigger type + location fields
+    const triggerType = (reminder && reminder.trigger_type) || "time";
+    this.setTriggerType(triggerType);
+
+    const zoneSource = reminder && reminder.custom_zone ? "custom" : "ha_zone";
+    this.setZoneSource(zoneSource);
+    this.shadowRoot.getElementById("input-zone-entity").value =
+      reminder && reminder.zone_entity_id ? reminder.zone_entity_id : "";
+    const customZone = (reminder && reminder.custom_zone) || {};
+    this.shadowRoot.getElementById("input-custom-zone-name").value = customZone.name || "";
+    this.shadowRoot.getElementById("input-custom-zone-lat").value =
+      customZone.latitude != null ? customZone.latitude : "";
+    this.shadowRoot.getElementById("input-custom-zone-lon").value =
+      customZone.longitude != null ? customZone.longitude : "";
+    this.shadowRoot.getElementById("input-custom-zone-radius").value =
+      customZone.radius != null ? customZone.radius : 150;
+    this.shadowRoot.getElementById("input-zone-event").value =
+      (reminder && reminder.zone_event) || "enter";
+    this.shadowRoot.getElementById("input-location-recurring").checked =
+      !!(reminder && reminder.location_recurring);
+
+    this.shadowRoot.getElementById("input-active-from").value =
+      reminder && reminder.active_from ? this.formatDateTimeLocalValue(new Date(reminder.active_from)) : "";
+    this.shadowRoot.getElementById("input-active-until").value =
+      reminder && reminder.active_until ? this.formatDateTimeLocalValue(new Date(reminder.active_until)) : "";
+
+    if (reminder && reminder.target_time && triggerType === "time") {
       const targetTime = new Date(reminder.target_time);
       if (!Number.isNaN(targetTime.getTime())) {
         this.setMode("datetime");
@@ -779,11 +1086,17 @@ class ReminderManagerPanel extends HTMLElement {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  formatDateTimeLocalValue(date) {
+    if (!date || Number.isNaN(date.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
   saveReminder() {
     const title = this.shadowRoot.getElementById("input-title").value;
     const message = this.shadowRoot.getElementById("input-message").value;
+    const triggerType = this.shadowRoot.getElementById("input-trigger-type").value;
     const mode = this.shadowRoot.getElementById("input-mode").value;
-    const repeat = mode === "datetime" ? this.shadowRoot.getElementById("input-repeat").value : "none";
     const mobile = this.shadowRoot.getElementById("input-mobile").checked;
     const persistent = this.shadowRoot.getElementById("input-persistent").checked;
     const targetUserIds = this.getSelectedValues("input-users");
@@ -804,76 +1117,136 @@ class ReminderManagerPanel extends HTMLElement {
       return;
     }
 
-    let targetTime = new Date();
     const startTime = new Date();
+    let targetTime = null;
+    let repeat = "none";
+    let repeatMetadata = { repeat_day: null, repeat_time: null };
 
-    if (mode === "duration") {
-      const days = parseInt(this.shadowRoot.getElementById("input-days").value || "0");
-      const hours = parseInt(this.shadowRoot.getElementById("input-hours").value || "0");
-      const mins = parseInt(this.shadowRoot.getElementById("input-minutes").value || "0");
-      
-      if (days === 0 && hours === 0 && mins === 0) {
-        alert("Durata trebuie sa fie mai mare decat zero!");
-        return;
-      }
-      
-      targetTime.setDate(targetTime.getDate() + days);
-      targetTime.setHours(targetTime.getHours() + hours);
-      targetTime.setMinutes(targetTime.getMinutes() + mins);
-    } else {
-      const dateVal = this.shadowRoot.getElementById("input-date").value;
-      const timeVal = this.shadowRoot.getElementById("input-time").value;
-      if (!dateVal || !timeVal) {
-        alert("Selectati atat data cat si ora!");
-        return;
-      }
-      targetTime = new Date(`${dateVal}T${timeVal}`);
-      
-      if (targetTime <= startTime) {
-        alert("Data si ora selectate trebuie sa fie in viitor!");
-        return;
+    if (triggerType === "time") {
+      targetTime = new Date();
+      repeat = mode === "datetime" ? this.shadowRoot.getElementById("input-repeat").value : "none";
+
+      if (mode === "duration") {
+        const days = parseInt(this.shadowRoot.getElementById("input-days").value || "0");
+        const hours = parseInt(this.shadowRoot.getElementById("input-hours").value || "0");
+        const mins = parseInt(this.shadowRoot.getElementById("input-minutes").value || "0");
+        if (days === 0 && hours === 0 && mins === 0) {
+          alert("Durata trebuie sa fie mai mare decat zero!");
+          return;
+        }
+        targetTime.setDate(targetTime.getDate() + days);
+        targetTime.setHours(targetTime.getHours() + hours);
+        targetTime.setMinutes(targetTime.getMinutes() + mins);
+      } else {
+        const dateVal = this.shadowRoot.getElementById("input-date").value;
+        const timeVal = this.shadowRoot.getElementById("input-time").value;
+        if (!dateVal || !timeVal) {
+          alert("Selectati atat data cat si ora!");
+          return;
+        }
+        targetTime = new Date(`${dateVal}T${timeVal}`);
+        if (targetTime <= startTime) {
+          alert("Data si ora selectate trebuie sa fie in viitor!");
+          return;
+        }
+        repeatMetadata = {
+          repeat_day: parseInt(dateVal.slice(-2), 10),
+          repeat_time: `${timeVal}:00`,
+        };
       }
     }
 
-    const repeatMetadata = mode === "datetime"
-      ? {
-          repeat_day: parseInt(this.shadowRoot.getElementById("input-date").value.slice(-2), 10),
-          repeat_time: `${this.shadowRoot.getElementById("input-time").value}:00`
+    // Location fields
+    let zoneEntityId = null;
+    let customZone = null;
+    let zoneEvent = "enter";
+    let locationRecurring = false;
+    if (triggerType === "location" || triggerType === "time_and_location") {
+      const zoneSource = this.shadowRoot.getElementById("input-zone-source").value;
+      if (zoneSource === "ha_zone") {
+        zoneEntityId = this.shadowRoot.getElementById("input-zone-entity").value;
+        if (!zoneEntityId) {
+          alert("Selectati o zona existenta sau treceti pe 'Locatie noua'.");
+          return;
         }
-      : {
-          repeat_day: null,
-          repeat_time: null
-        };
+      } else {
+        const latVal = this.shadowRoot.getElementById("input-custom-zone-lat").value;
+        const lonVal = this.shadowRoot.getElementById("input-custom-zone-lon").value;
+        const radiusVal = this.shadowRoot.getElementById("input-custom-zone-radius").value;
+        const nameVal = this.shadowRoot.getElementById("input-custom-zone-name").value;
+        const lat = parseFloat(latVal);
+        const lon = parseFloat(lonVal);
+        const radius = parseFloat(radiusVal);
+        if (Number.isNaN(lat) || Number.isNaN(lon)) {
+          alert("Completati latitudinea si longitudinea pentru locatia noua.");
+          return;
+        }
+        if (Number.isNaN(radius) || radius <= 0) {
+          alert("Raza trebuie sa fie un numar pozitiv (metri).");
+          return;
+        }
+        customZone = { name: nameVal, latitude: lat, longitude: lon, radius };
+      }
+      zoneEvent = this.shadowRoot.getElementById("input-zone-event").value;
+      locationRecurring = this.shadowRoot.getElementById("input-location-recurring").checked;
+    }
+
+    const activeFromVal = this.shadowRoot.getElementById("input-active-from").value;
+    const activeUntilVal = this.shadowRoot.getElementById("input-active-until").value;
+    const activeFrom = activeFromVal ? new Date(activeFromVal).toISOString() : null;
+    const activeUntil = activeUntilVal ? new Date(activeUntilVal).toISOString() : null;
+
+    if (triggerType === "time_and_location" && !activeFrom) {
+      alert('Pentru "Dupa o data, la o locatie" trebuie sa setezi "Activ incepand cu".');
+      return;
+    }
+    if (activeFrom && activeUntil && new Date(activeFrom) >= new Date(activeUntil)) {
+      alert('"Activ incepand cu" trebuie sa fie inainte de "Activ pana la".');
+      return;
+    }
+
+    const corePayload = {
+      title,
+      message,
+      trigger_type: triggerType,
+      target_time: targetTime ? targetTime.toISOString() : null,
+      repeat,
+      ...repeatMetadata,
+      notify_mobile: mobile,
+      notify_persistent: persistent,
+      target_user_ids: targetUserIds.length > 0 ? targetUserIds : this.getDefaultTargetUserIds(),
+      notify_targets: notifyTargets,
+      zone_entity_id: zoneEntityId,
+      custom_zone: customZone,
+      zone_event: zoneEvent,
+      location_recurring: locationRecurring,
+      active_from: activeFrom,
+      active_until: activeUntil,
+    };
 
     if (this.editingId) {
-      this.performAction("update", { 
-        id: this.editingId, 
-        updates: { 
-          title, message, target_time: targetTime.toISOString(), 
-          repeat,
-          ...repeatMetadata,
-          notify_mobile: mobile, notify_persistent: persistent,
-          target_user_ids: targetUserIds,
-          notify_targets: notifyTargets,
-          status: "active", notified: false, pre_notified: false, pre_notification_bucket: null
-        } 
+      this.performAction("update", {
+        id: this.editingId,
+        updates: {
+          ...corePayload,
+          status: "active",
+          notified: false,
+          pre_notified: false,
+          pre_notification_bucket: null,
+          location_triggered: false,
+          last_in_zone: false,
+        },
       });
     } else {
       const reminder = {
-        title,
-        message,
+        ...corePayload,
         start_time: startTime.toISOString(),
-        target_time: targetTime.toISOString(),
         status: "active",
-        repeat,
-        ...repeatMetadata,
-        notify_mobile: mobile,
-        notify_persistent: persistent,
-        target_user_ids: targetUserIds.length > 0 ? targetUserIds : this.getDefaultTargetUserIds(),
-        notify_targets: notifyTargets,
         notified: false,
         pre_notified: false,
-        pre_notification_bucket: null
+        pre_notification_bucket: null,
+        location_triggered: false,
+        last_in_zone: false,
       };
       this.performAction("add", { reminder });
     }
@@ -903,10 +1276,20 @@ class ReminderManagerPanel extends HTMLElement {
     filtered.forEach(r => {
       const card = document.createElement("div");
       card.className = `reminder-card status-${r.status}`;
-      
-      const targetTime = new Date(r.target_time);
+
+      const triggerType = r.trigger_type || "time";
+      const isTimeTrigger = triggerType === "time";
       const statusLabel = this.formatStatusLabel(r.status);
-      
+
+      const primaryMetaLabel = isTimeTrigger ? "Tinta" : "Locatie";
+      const primaryMetaValue = isTimeTrigger
+        ? new Date(r.target_time).toLocaleString()
+        : this.formatLocationSummary(r);
+      const secondaryMetaLabel = isTimeTrigger ? "Repetare" : "Eveniment";
+      const secondaryMetaValue = isTimeTrigger
+        ? this.formatRepeatLabel(r.repeat)
+        : this.formatZoneEventLabel(r);
+
       let html = `
         <div class="reminder-card-header">
           <div class="reminder-status-badge status-badge-${r.status}">${statusLabel}</div>
@@ -915,12 +1298,12 @@ class ReminderManagerPanel extends HTMLElement {
         </div>
         <div class="reminder-meta-grid">
           <div class="reminder-meta-card">
-            <div class="reminder-meta-label">Tinta</div>
-            <div class="reminder-meta-value">${targetTime.toLocaleString()}</div>
+            <div class="reminder-meta-label">${primaryMetaLabel}</div>
+            <div class="reminder-meta-value meta-compact" title="${this.escapeAttribute(primaryMetaValue)}">${primaryMetaValue}</div>
           </div>
           <div class="reminder-meta-card">
-            <div class="reminder-meta-label">Repetare</div>
-            <div class="reminder-meta-value">${this.formatRepeatLabel(r.repeat)}</div>
+            <div class="reminder-meta-label">${secondaryMetaLabel}</div>
+            <div class="reminder-meta-value">${secondaryMetaValue}</div>
           </div>
           <div class="reminder-meta-card">
             <div class="reminder-meta-label">Utilizatori</div>
@@ -933,7 +1316,13 @@ class ReminderManagerPanel extends HTMLElement {
         </div>
       `;
 
-      if (r.status === "active" || r.status === "expired") {
+      if (!isTimeTrigger && (r.active_from || r.active_until)) {
+        const fromStr = r.active_from ? new Date(r.active_from).toLocaleString() : "imediat";
+        const untilStr = r.active_until ? new Date(r.active_until).toLocaleString() : "fara expirare";
+        html += `<div class="reminder-meta-card"><div class="reminder-meta-label">Fereastra activa</div><div class="reminder-meta-value">${fromStr} &rarr; ${untilStr}</div></div>`;
+      }
+
+      if (isTimeTrigger && (r.status === "active" || r.status === "expired")) {
         html += `
           <div class="reminder-timer-block">
             <div class="reminder-timer-label">Timp</div>
@@ -951,7 +1340,7 @@ class ReminderManagerPanel extends HTMLElement {
         html += `<button class="btn-done" data-id="${r.id}">Done</button>`;
       }
       
-      if (r.status === "active" || r.status === "expired") {
+      if (isTimeTrigger && (r.status === "active" || r.status === "expired")) {
         html += `
           <div class="snooze-wrapper">
             <select id="snooze-select-${r.id}">
@@ -1027,10 +1416,12 @@ class ReminderManagerPanel extends HTMLElement {
     const now = new Date();
     this.reminders.forEach(r => {
       if (r.status !== "active" && r.status !== "expired") return;
-      
+      if ((r.trigger_type || "time") !== "time") return;
+      if (!r.target_time) return;
+
       const cdEl = this.shadowRoot.getElementById("cd-" + r.id);
       const pbEl = this.shadowRoot.getElementById("pb-" + r.id);
-      
+
       if (!cdEl || !pbEl) return;
 
       const start = new Date(r.start_time);
