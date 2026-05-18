@@ -26,15 +26,18 @@ class ReminderManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return ReminderManagerOptionsFlowHandler(config_entry)
+        return ReminderManagerOptionsFlowHandler()
 
 
 class ReminderManagerOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for Reminder Manager."""
+    """Handle options flow for Reminder Manager.
 
-    def __init__(self, config_entry):
-        """Initialize options flow."""
-        self.config_entry = config_entry
+    Note: starting with Home Assistant 2024.11 the framework injects
+    ``self.config_entry`` automatically and explicitly assigning to it in
+    ``__init__`` was removed in 2025.12 (causes HTTP 500 when the user
+    opens the integration's settings cog). We rely on the inherited
+    attribute and avoid overriding the constructor.
+    """
 
     async def async_step_init(self, user_input=None):
         """Manage the options."""
@@ -42,8 +45,8 @@ class ReminderManagerOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         current_notify_service = self.config_entry.options.get(
-            "notify_service", 
-            self.config_entry.data.get("notify_service", "notify.notify")
+            "notify_service",
+            self.config_entry.data.get("notify_service", "notify.notify"),
         )
 
         data_schema = vol.Schema({

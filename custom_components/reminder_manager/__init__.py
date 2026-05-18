@@ -4,27 +4,36 @@ import uuid
 
 from homeassistant.components.frontend import async_remove_panel
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .api import ReminderManagerAPI
 from .const import (
     DOMAIN,
     PANEL_URL_PATH,
+    STALE_RECURRING_THRESHOLD_HOURS,
     STATUS_ACTIVE,
     STATUS_DONE,
     STATUS_EXPIRED,
+    ZONE_EVENT_ENTER,
+    ZONE_EVENT_LEAVE,
 )
 from .panel import async_setup_panel
 from .reminders import (
     build_next_monthly_reminder,
     enrich_repeat_metadata,
+    haversine_meters,
     is_monthly_repeat,
+    is_within_active_window,
+    location_reminder_expired,
     normalize_reminder_payload,
     normalize_reminder_updates,
+    reminder_has_location_trigger,
+    reminder_has_time_trigger,
     reminder_targets,
+    resolve_zone_coordinates,
     split_reminder_per_user,
 )
 from .storage import ReminderStorage
@@ -36,7 +45,6 @@ _PRE_NOTIFICATION_WINDOW = datetime.timedelta(minutes=5)
 _MOBILE_NOTIFICATION_ACTION_EVENT = "mobile_app_notification_action"
 _ACTION_DONE_PREFIX = "REMINDER_DONE"
 _ACTION_SNOOZE_PREFIX = "REMINDER_SNOOZE_10"
-
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -155,9 +163,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     async def check_reminders(_now):
         notify_service = domain_data.get("notify_service", _DEFAULT_NOTIFY_SERVICE)
         await _process_due_reminders(hass, storage, notify_service)
+        await _expire_stale_location_reminders(storage)
 
     entry.async_on_unload(async_track_time_interval(hass, check_reminders, _CHECK_INTERVAL))
     hass.async_create_task(check_reminders(None))
+
+    @callback
+    def handle_tracker_state_change(event: Event) -> None:
+        """Schedule a location-trigger evaluation when a tracked entity moves."""
+        notify_service = domain_data.get("notify_service", _DEFAULT_NOTIFY_SERVICE)
+        hass.async_create_task(
+            _process_location_change(hass, storage, event, notify_service)
+        )
+
+    entry.async_on_unload(
+        async_track_state_change_event(
+            hass,
+            _list_tracked_entity_ids(hass),
+            handle_tracker_state_change,
+        )
+    )
+    hass.async_create_task(_evaluate_all_location_reminders(hass, storage, domain_data))
 
     async def handle_create_service(call):
         title = call.data.get("title", "New Reminder")
@@ -642,8 +668,15 @@ async def _process_due_reminders(
     needs_save = False
     current_time = dt_util.utcnow()
 
+    stale_threshold = datetime.timedelta(hours=STALE_RECURRING_THRESHOLD_HOURS)
+
     for reminder in reminders:
         if reminder.get("status") != STATUS_ACTIVE or reminder.get("notified"):
+            continue
+
+        # Pure location triggers don't fire on time. Time+location reminders are
+        # gated by active_from and only fire via the state-change handler.
+        if not reminder_has_time_trigger(reminder):
             continue
 
         target_time_str = reminder.get("target_time")
@@ -677,6 +710,11 @@ async def _process_due_reminders(
                 needs_save = True
 
             if current_time >= target_time_utc:
+                missed_by = current_time - target_time_utc
+                is_stale_recurring = (
+                    is_monthly_repeat(reminder) and missed_by > stale_threshold
+                )
+
                 if is_monthly_repeat(reminder) and not reminder.get("next_occurrence_scheduled"):
                     reminders_to_add.append(
                         build_next_monthly_reminder(
@@ -688,7 +726,20 @@ async def _process_due_reminders(
                     )
                     reminder["next_occurrence_scheduled"] = True
 
-                await _send_notification(hass, reminder, notify_service)
+                # Bug #2 fix: when a monthly reminder was missed by more than the
+                # stale threshold (e.g. HA was offline), advance silently rather
+                # than emitting a notification storm for each skipped occurrence.
+                if not is_stale_recurring:
+                    await _send_notification(hass, reminder, notify_service)
+                else:
+                    _LOGGER.info(
+                        "Skipping stale recurring notification for reminder %s "
+                        "(missed by %s, target was %s)",
+                        reminder.get("id"),
+                        missed_by,
+                        target_time_str,
+                    )
+
                 reminder["status"] = STATUS_EXPIRED
                 reminder["notified"] = True
                 reminder["pre_notification_bucket"] = None
@@ -705,5 +756,189 @@ async def _process_due_reminders(
         storage.data["reminders"] = reminders
         needs_save = True
 
+    if needs_save:
+        await storage.async_save()
+
+
+def _list_tracked_entity_ids(hass: HomeAssistant) -> list[str]:
+    """Return the list of person entity ids to monitor for location changes."""
+    return [state.entity_id for state in hass.states.async_all("person")]
+
+
+def _zone_lookup_for_hass(hass: HomeAssistant):
+    """Return a callable that resolves a zone entity id to its coordinates dict."""
+
+    def lookup(zone_entity_id: str):
+        state = hass.states.get(zone_entity_id)
+        if not state:
+            return None
+        attrs = state.attributes or {}
+        latitude = attrs.get("latitude")
+        longitude = attrs.get("longitude")
+        if latitude is None or longitude is None:
+            return None
+        return {
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "radius": float(attrs.get("radius", 100)),
+        }
+
+    return lookup
+
+
+def _state_user_id(state) -> str | None:
+    """Extract the Home Assistant user_id associated with a tracker state."""
+    if not state or not state.attributes:
+        return None
+    return state.attributes.get("user_id")
+
+
+def _state_position(state) -> tuple[float, float] | None:
+    """Extract (lat, lon) from a tracker state if available."""
+    if not state or not state.attributes:
+        return None
+    latitude = state.attributes.get("latitude")
+    longitude = state.attributes.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+    try:
+        return float(latitude), float(longitude)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _process_location_change(
+    hass: HomeAssistant,
+    storage: ReminderStorage,
+    event: Event,
+    notify_service: str,
+) -> None:
+    """Handle a state change on a tracked entity and fire matching reminders."""
+    new_state = event.data.get("new_state")
+    if not new_state:
+        return
+    user_id = _state_user_id(new_state)
+    if not user_id:
+        return
+    position = _state_position(new_state)
+    if not position:
+        return
+
+    await _evaluate_location_reminders_for_user(
+        hass, storage, user_id, position, notify_service
+    )
+
+
+async def _evaluate_location_reminders_for_user(
+    hass: HomeAssistant,
+    storage: ReminderStorage,
+    user_id: str,
+    position: tuple[float, float],
+    notify_service: str,
+) -> None:
+    """Evaluate all of a given user's location reminders against `position`."""
+    zone_lookup = _zone_lookup_for_hass(hass)
+    now = dt_util.utcnow()
+    needs_save = False
+    user_lat, user_lon = position
+
+    for reminder in storage.get_reminders():
+        if reminder.get("status") != STATUS_ACTIVE:
+            continue
+        if not reminder_has_location_trigger(reminder):
+            continue
+        target_user_ids = reminder.get("target_user_ids") or []
+        if user_id not in target_user_ids:
+            continue
+
+        try:
+            coords = resolve_zone_coordinates(reminder, zone_lookup)
+        except Exception:
+            _LOGGER.exception(
+                "Failed to resolve zone for reminder %s", reminder.get("id")
+            )
+            continue
+        if not coords:
+            _LOGGER.debug(
+                "Reminder %s references unknown zone, skipping",
+                reminder.get("id"),
+            )
+            continue
+
+        zone_lat, zone_lon, radius = coords
+        distance = haversine_meters(user_lat, user_lon, zone_lat, zone_lon)
+        in_zone = distance <= radius
+        last_in_zone = bool(reminder.get("last_in_zone"))
+
+        # Always remember the latest in/out state so enter/leave edges are
+        # detected on the next move.
+        if reminder.get("last_in_zone") != in_zone:
+            reminder["last_in_zone"] = in_zone
+            needs_save = True
+
+        if not is_within_active_window(reminder, now):
+            continue
+
+        zone_event = reminder.get("zone_event") or ZONE_EVENT_ENTER
+        crossed_enter = zone_event == ZONE_EVENT_ENTER and in_zone and not last_in_zone
+        crossed_leave = zone_event == ZONE_EVENT_LEAVE and last_in_zone and not in_zone
+        if not (crossed_enter or crossed_leave):
+            continue
+
+        try:
+            await _send_notification(hass, reminder, notify_service)
+        except Exception:
+            _LOGGER.exception(
+                "Failed to send location notification for reminder %s",
+                reminder.get("id"),
+            )
+            continue
+
+        if reminder.get("location_recurring"):
+            # Recurring location reminder: stay active but mark that we've fired
+            # this round; it will re-arm naturally on the next opposite edge.
+            reminder["location_triggered"] = True
+        else:
+            reminder["status"] = STATUS_EXPIRED
+            reminder["location_triggered"] = True
+        needs_save = True
+
+    if needs_save:
+        await storage.async_save()
+
+
+async def _evaluate_all_location_reminders(
+    hass: HomeAssistant,
+    storage: ReminderStorage,
+    domain_data: dict,
+) -> None:
+    """Run a first-pass evaluation against current tracker positions on startup."""
+    notify_service = domain_data.get("notify_service", _DEFAULT_NOTIFY_SERVICE)
+    seen_users: set[str] = set()
+    for state in hass.states.async_all("person"):
+        user_id = _state_user_id(state)
+        if not user_id or user_id in seen_users:
+            continue
+        position = _state_position(state)
+        if not position:
+            continue
+        seen_users.add(user_id)
+        await _evaluate_location_reminders_for_user(
+            hass, storage, user_id, position, notify_service
+        )
+
+
+async def _expire_stale_location_reminders(storage: ReminderStorage) -> None:
+    """Mark location reminders past their active_until window as expired."""
+    needs_save = False
+    now = dt_util.utcnow()
+    for reminder in storage.get_reminders():
+        if reminder.get("status") != STATUS_ACTIVE:
+            continue
+        if not reminder_has_location_trigger(reminder):
+            continue
+        if location_reminder_expired(reminder, now):
+            reminder["status"] = STATUS_EXPIRED
+            needs_save = True
     if needs_save:
         await storage.async_save()

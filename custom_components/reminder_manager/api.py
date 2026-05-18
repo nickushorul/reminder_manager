@@ -4,13 +4,20 @@ from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.util import dt as dt_util
 
-from .const import API_ENDPOINT
+from .const import (
+    API_ENDPOINT,
+    TRIGGER_LOCATION,
+    TRIGGER_TIME,
+    TRIGGER_TIME_AND_LOCATION,
+)
 from .reminders import (
     enrich_repeat_metadata,
     normalize_reminder_payload,
     normalize_reminder_updates,
+    normalize_trigger_type,
     reminder_is_visible_to_user,
     split_reminder_per_user,
+    validate_location_payload,
 )
 
 
@@ -54,7 +61,7 @@ class ReminderManagerAPI(HomeAssistantView):
             for reminder in self.storage.get_reminders()
             if reminder_is_visible_to_user(reminder, current_user_id)
         ]
-        reminders = sorted(reminders, key=lambda x: x.get("target_time", ""))
+        reminders = sorted(reminders, key=lambda x: x.get("target_time") or "")
         if request.query.get("include_meta") == "1":
             return self.json(
                 {
@@ -62,6 +69,7 @@ class ReminderManagerAPI(HomeAssistantView):
                     "current_user": self._serialize_user(current_user),
                     "available_users": await self._get_available_users(),
                     "available_notify_targets": self._get_available_notify_targets(),
+                    "available_zones": self._get_available_zones(),
                 }
             )
         return self.json(reminders)
@@ -85,31 +93,51 @@ class ReminderManagerAPI(HomeAssistantView):
             if not isinstance(reminder, dict):
                 return self.json({"error": "Invalid reminder payload"}, status_code=400)
 
-            # Backend validation
             if not reminder.get("title") or not reminder.get("message"):
                 return self.json({"error": "Title and message are required"}, status_code=400)
 
-            target_time_str = reminder.get("target_time")
-            if not target_time_str:
-                return self.json({"error": "target_time is required"}, status_code=400)
-
             try:
-                target_time = _parse_target_time(target_time_str)
+                trigger_type = normalize_trigger_type(reminder.get("trigger_type", TRIGGER_TIME))
             except ValueError:
-                return self.json({"error": "Invalid target_time format"}, status_code=400)
+                return self.json({"error": "Invalid trigger_type"}, status_code=400)
 
-            if not _is_future_target_time(target_time):
-                return self.json({"error": "target_time must be in the future"}, status_code=400)
+            target_time = None
+            target_time_str = reminder.get("target_time")
+            if trigger_type == TRIGGER_TIME:
+                if not target_time_str:
+                    return self.json({"error": "target_time is required"}, status_code=400)
+                try:
+                    target_time = _parse_target_time(target_time_str)
+                except ValueError:
+                    return self.json({"error": "Invalid target_time format"}, status_code=400)
+                if not _is_future_target_time(target_time):
+                    return self.json({"error": "target_time must be in the future"}, status_code=400)
+            elif target_time_str:
+                try:
+                    target_time = _parse_target_time(target_time_str)
+                except ValueError:
+                    return self.json({"error": "Invalid target_time format"}, status_code=400)
+
+            if trigger_type in (TRIGGER_LOCATION, TRIGGER_TIME_AND_LOCATION):
+                try:
+                    validate_location_payload({**reminder, "trigger_type": trigger_type})
+                except ValueError as err:
+                    return self.json({"error": str(err)}, status_code=400)
 
             try:
                 reminder = normalize_reminder_payload(reminder, current_user_id)
             except ValueError as err:
                 return self.json({"error": str(err)}, status_code=400)
 
+            reminder.setdefault("status", "active")
+            reminder.setdefault("notified", False)
             reminder.setdefault("pre_notified", False)
             reminder.setdefault("pre_notification_bucket", None)
             reminder.setdefault("next_occurrence_scheduled", False)
-            reminder = enrich_repeat_metadata(reminder, target_time)
+            reminder.setdefault("location_triggered", False)
+            reminder.setdefault("last_in_zone", False)
+            if target_time is not None:
+                reminder = enrich_repeat_metadata(reminder, target_time)
 
             if not reminder.get("id"):
                 reminder["id"] = str(uuid.uuid4())
@@ -136,8 +164,24 @@ class ReminderManagerAPI(HomeAssistantView):
                 except ValueError as err:
                     return self.json({"error": str(err)}, status_code=400)
 
+                merged_trigger_type = updates.get("trigger_type", stored_reminder.get("trigger_type", TRIGGER_TIME))
+                if merged_trigger_type in (TRIGGER_LOCATION, TRIGGER_TIME_AND_LOCATION):
+                    try:
+                        validate_location_payload({**stored_reminder, **updates})
+                    except ValueError as err:
+                        return self.json({"error": str(err)}, status_code=400)
+
                 target_time = None
-                if "target_time" in updates:
+                effective_target_time_str = updates.get(
+                    "target_time", stored_reminder.get("target_time")
+                )
+                if merged_trigger_type == TRIGGER_TIME and not effective_target_time_str:
+                    return self.json(
+                        {"error": "target_time is required for time reminders"},
+                        status_code=400,
+                    )
+
+                if "target_time" in updates and updates["target_time"]:
                     try:
                         target_time = _parse_target_time(updates["target_time"])
                     except ValueError:
@@ -153,14 +197,19 @@ class ReminderManagerAPI(HomeAssistantView):
                     updates.setdefault("pre_notified", False)
                     updates.setdefault("pre_notification_bucket", None)
 
-                if "target_time" in updates or "repeat" in updates:
-                    effective_target_time = target_time if "target_time" in updates else _parse_target_time(
-                        stored_reminder["target_time"]
-                    )
-                    combined = enrich_repeat_metadata({**stored_reminder, **updates}, effective_target_time)
-                    updates["repeat"] = combined.get("repeat")
-                    updates["repeat_day"] = combined.get("repeat_day")
-                    updates["repeat_time"] = combined.get("repeat_time")
+                if ("target_time" in updates and updates["target_time"]) or "repeat" in updates:
+                    if target_time is None and effective_target_time_str:
+                        target_time = _parse_target_time(effective_target_time_str)
+                    if target_time is not None:
+                        combined = enrich_repeat_metadata({**stored_reminder, **updates}, target_time)
+                        updates["repeat"] = combined.get("repeat")
+                        updates["repeat_day"] = combined.get("repeat_day")
+                        updates["repeat_time"] = combined.get("repeat_time")
+
+                if merged_trigger_type in (TRIGGER_LOCATION, TRIGGER_TIME_AND_LOCATION):
+                    updates.setdefault("location_triggered", False)
+                    updates.setdefault("last_in_zone", False)
+                    updates.setdefault("status", "active")
 
                 updated = await self.storage.update_reminder(reminder_id, updates)
             else:
@@ -213,6 +262,27 @@ class ReminderManagerAPI(HomeAssistantView):
             )
 
         return targets
+
+    def _get_available_zones(self):
+        """Return available HA zones with name and coordinates."""
+        zones = []
+        for state in self.hass.states.async_all("zone"):
+            attrs = state.attributes or {}
+            latitude = attrs.get("latitude")
+            longitude = attrs.get("longitude")
+            if latitude is None or longitude is None:
+                continue
+            zones.append(
+                {
+                    "entity_id": state.entity_id,
+                    "name": attrs.get("friendly_name") or state.entity_id.removeprefix("zone."),
+                    "latitude": float(latitude),
+                    "longitude": float(longitude),
+                    "radius": float(attrs.get("radius", 100)),
+                    "icon": attrs.get("icon"),
+                }
+            )
+        return sorted(zones, key=lambda z: z["name"].lower())
 
     @staticmethod
     def _serialize_user(user):

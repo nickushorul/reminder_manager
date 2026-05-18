@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import calendar
+import math
 from datetime import datetime
 from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import REPEAT_MONTHLY, REPEAT_NONE
+from .const import (
+    REPEAT_MONTHLY,
+    REPEAT_NONE,
+    TRIGGER_LOCATION,
+    TRIGGER_TIME,
+    TRIGGER_TIME_AND_LOCATION,
+    ZONE_EVENT_ENTER,
+    ZONE_EVENT_LEAVE,
+)
+
+_EARTH_RADIUS_METERS = 6_371_000.0
+_VALID_TRIGGER_TYPES = {TRIGGER_TIME, TRIGGER_LOCATION, TRIGGER_TIME_AND_LOCATION}
+_VALID_ZONE_EVENTS = {ZONE_EVENT_ENTER, ZONE_EVENT_LEAVE}
 
 
 def normalize_user_ids(value: Any) -> list[str]:
@@ -73,14 +86,132 @@ def normalize_repeat_time(value: Any) -> str | None:
     return parsed.replace(microsecond=0).isoformat()
 
 
+def normalize_trigger_type(value: Any) -> str:
+    """Normalize the trigger type."""
+    if value in (None, ""):
+        return TRIGGER_TIME
+
+    if not isinstance(value, str):
+        raise ValueError("trigger_type must be a string")
+
+    trigger = value.strip().lower()
+    if trigger not in _VALID_TRIGGER_TYPES:
+        raise ValueError(
+            "trigger_type must be one of: time, location, time_and_location"
+        )
+    return trigger
+
+
+def normalize_zone_event(value: Any) -> str:
+    """Normalize the zone event."""
+    if value in (None, ""):
+        return ZONE_EVENT_ENTER
+
+    if not isinstance(value, str):
+        raise ValueError("zone_event must be a string")
+
+    event = value.strip().lower()
+    if event not in _VALID_ZONE_EVENTS:
+        raise ValueError("zone_event must be one of: enter, leave")
+    return event
+
+
+def _normalize_iso_or_none(value: Any, field_name: str) -> str | None:
+    """Normalize an ISO datetime string, allowing None/empty for absent values."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be an ISO datetime string")
+    parsed = dt_util.parse_datetime(value)
+    if parsed is None:
+        raise ValueError(f"{field_name} must be a valid ISO datetime")
+    return parsed.isoformat()
+
+
+def normalize_zone_entity_id(value: Any) -> str | None:
+    """Normalize a HA zone entity id (e.g. zone.home)."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("zone_entity_id must be a string")
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if not cleaned.startswith("zone."):
+        raise ValueError("zone_entity_id must start with 'zone.'")
+    return cleaned
+
+
+def normalize_custom_zone(value: Any) -> dict[str, Any] | None:
+    """Normalize a custom (ad-hoc) zone dictionary with lat/lon/radius."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("custom_zone must be an object")
+
+    try:
+        latitude = float(value.get("latitude"))
+        longitude = float(value.get("longitude"))
+    except (TypeError, ValueError):
+        raise ValueError("custom_zone latitude and longitude are required numbers") from None
+
+    if not -90 <= latitude <= 90:
+        raise ValueError("custom_zone latitude must be between -90 and 90")
+    if not -180 <= longitude <= 180:
+        raise ValueError("custom_zone longitude must be between -180 and 180")
+
+    radius_value = value.get("radius", 100)
+    try:
+        radius = float(radius_value)
+    except (TypeError, ValueError):
+        raise ValueError("custom_zone radius must be a number") from None
+    if radius <= 0 or radius > 50_000:
+        raise ValueError("custom_zone radius must be between 1 and 50000 meters")
+
+    name = value.get("name")
+    if name is not None and not isinstance(name, str):
+        raise ValueError("custom_zone name must be a string")
+
+    return {
+        "name": (name or "").strip() or "Locatie personalizata",
+        "latitude": latitude,
+        "longitude": longitude,
+        "radius": radius,
+    }
+
+
+def validate_location_payload(reminder: dict[str, Any]) -> None:
+    """Validate that a location-based reminder has the required fields."""
+    zone_entity_id = reminder.get("zone_entity_id")
+    custom_zone = reminder.get("custom_zone")
+    if not zone_entity_id and not custom_zone:
+        raise ValueError("Location reminders require zone_entity_id or custom_zone")
+    if zone_entity_id and custom_zone:
+        raise ValueError("Set either zone_entity_id or custom_zone, not both")
+
+    if reminder.get("trigger_type") == TRIGGER_TIME_AND_LOCATION:
+        if not reminder.get("active_from"):
+            raise ValueError(
+                "time_and_location reminders require active_from (the earliest moment "
+                "the location trigger is armed)"
+            )
+
+
 def normalize_reminder_payload(reminder: dict[str, Any], owner_user_id: str | None) -> dict[str, Any]:
     """Normalize a full reminder payload coming from the API/UI."""
     normalized = dict(reminder)
+    normalized["trigger_type"] = normalize_trigger_type(normalized.get("trigger_type"))
     normalized["repeat"] = normalize_repeat(normalized.get("repeat"))
     normalized["repeat_day"] = normalize_repeat_day(normalized.get("repeat_day"))
     normalized["repeat_time"] = normalize_repeat_time(normalized.get("repeat_time"))
     normalized["target_user_ids"] = normalize_user_ids(normalized.get("target_user_ids"))
     normalized["notify_targets"] = normalize_notify_targets(normalized.get("notify_targets"))
+    normalized["zone_event"] = normalize_zone_event(normalized.get("zone_event"))
+    normalized["zone_entity_id"] = normalize_zone_entity_id(normalized.get("zone_entity_id"))
+    normalized["custom_zone"] = normalize_custom_zone(normalized.get("custom_zone"))
+    normalized["active_from"] = _normalize_iso_or_none(normalized.get("active_from"), "active_from")
+    normalized["active_until"] = _normalize_iso_or_none(normalized.get("active_until"), "active_until")
+    normalized["location_recurring"] = bool(normalized.get("location_recurring", False))
 
     if owner_user_id and not normalized.get("owner_user_id"):
         normalized["owner_user_id"] = owner_user_id
@@ -94,6 +225,9 @@ def normalize_reminder_payload(reminder: dict[str, Any], owner_user_id: str | No
 def normalize_reminder_updates(updates: dict[str, Any]) -> dict[str, Any]:
     """Normalize a partial reminder update payload."""
     normalized = dict(updates)
+
+    if "trigger_type" in normalized:
+        normalized["trigger_type"] = normalize_trigger_type(normalized.get("trigger_type"))
 
     if "repeat" in normalized:
         normalized["repeat"] = normalize_repeat(normalized.get("repeat"))
@@ -110,7 +244,115 @@ def normalize_reminder_updates(updates: dict[str, Any]) -> dict[str, Any]:
     if "notify_targets" in normalized:
         normalized["notify_targets"] = normalize_notify_targets(normalized.get("notify_targets"))
 
+    if "zone_event" in normalized:
+        normalized["zone_event"] = normalize_zone_event(normalized.get("zone_event"))
+
+    if "zone_entity_id" in normalized:
+        normalized["zone_entity_id"] = normalize_zone_entity_id(normalized.get("zone_entity_id"))
+
+    if "custom_zone" in normalized:
+        normalized["custom_zone"] = normalize_custom_zone(normalized.get("custom_zone"))
+
+    if "active_from" in normalized:
+        normalized["active_from"] = _normalize_iso_or_none(normalized.get("active_from"), "active_from")
+
+    if "active_until" in normalized:
+        normalized["active_until"] = _normalize_iso_or_none(normalized.get("active_until"), "active_until")
+
+    if "location_recurring" in normalized:
+        normalized["location_recurring"] = bool(normalized.get("location_recurring"))
+
     return normalized
+
+
+def reminder_has_location_trigger(reminder: dict[str, Any]) -> bool:
+    """Return True if the reminder uses location (alone or combined with time)."""
+    trigger = reminder.get("trigger_type") or TRIGGER_TIME
+    return trigger in (TRIGGER_LOCATION, TRIGGER_TIME_AND_LOCATION)
+
+
+def reminder_has_time_trigger(reminder: dict[str, Any]) -> bool:
+    """Return True if the reminder fires purely on time."""
+    trigger = reminder.get("trigger_type") or TRIGGER_TIME
+    return trigger == TRIGGER_TIME
+
+
+def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distance in meters between two lat/lon pairs."""
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return _EARTH_RADIUS_METERS * c
+
+
+def resolve_zone_coordinates(
+    reminder: dict[str, Any], zone_lookup
+) -> tuple[float, float, float] | None:
+    """Resolve a reminder's zone to a (latitude, longitude, radius) triple.
+
+    `zone_lookup` is a callable that takes a zone entity_id and returns a dict
+    with keys latitude/longitude/radius — or None if the zone is unknown.
+    """
+    custom_zone = reminder.get("custom_zone")
+    if custom_zone:
+        return (
+            float(custom_zone["latitude"]),
+            float(custom_zone["longitude"]),
+            float(custom_zone.get("radius", 100)),
+        )
+
+    zone_entity_id = reminder.get("zone_entity_id")
+    if not zone_entity_id:
+        return None
+
+    zone = zone_lookup(zone_entity_id) if callable(zone_lookup) else None
+    if not zone:
+        return None
+    return (
+        float(zone["latitude"]),
+        float(zone["longitude"]),
+        float(zone.get("radius", 100)),
+    )
+
+
+def is_within_active_window(
+    reminder: dict[str, Any], now: datetime | None = None
+) -> bool:
+    """Return True if `now` falls inside the reminder's active_from/until window."""
+    now = now or dt_util.utcnow()
+    now_utc = dt_util.as_utc(now)
+
+    active_from = reminder.get("active_from")
+    if active_from:
+        parsed = dt_util.parse_datetime(active_from)
+        if parsed and dt_util.as_utc(parsed) > now_utc:
+            return False
+
+    active_until = reminder.get("active_until")
+    if active_until:
+        parsed = dt_util.parse_datetime(active_until)
+        if parsed and dt_util.as_utc(parsed) < now_utc:
+            return False
+
+    return True
+
+
+def location_reminder_expired(reminder: dict[str, Any], now: datetime | None = None) -> bool:
+    """Return True if a location reminder's active_until has passed."""
+    active_until = reminder.get("active_until")
+    if not active_until:
+        return False
+    parsed = dt_util.parse_datetime(active_until)
+    if not parsed:
+        return False
+    now = now or dt_util.utcnow()
+    return dt_util.as_utc(parsed) < dt_util.as_utc(now)
 
 
 def reminder_is_visible_to_user(reminder: dict[str, Any], user_id: str | None) -> bool:
